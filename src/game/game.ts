@@ -105,13 +105,38 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
     netClient = new NetClient();
     const hash = await hashWad(wadBuffer);
     try {
-      // surface the room code while waiting for player 2
+      // surface the room code + a copyable invite link while waiting
+      let shownRoom = '';
       const poll = setInterval(() => {
-        if (netClient!.room) {
-          status.textContent =
-            `Room code: ${netClient!.room}\n\nwaiting for player 2…\n\n` +
-            `they should open ${location.origin}/?server=${encodeURIComponent(net.url)}&room=${netClient!.room}`;
-        }
+        const room = netClient!.room;
+        if (!room || room === shownRoom) return;
+        shownRoom = room;
+        const sameOrigin =
+          net.url === `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
+        const joinUrl = sameOrigin
+          ? `${location.origin}/?room=${room}`
+          : `${location.origin}/?server=${encodeURIComponent(net.url)}&room=${room}`;
+        status.innerHTML = `
+          <div style="text-align:center">
+            <div style="color:#a66;font:13px monospace;margin-bottom:8px">ROOM CODE</div>
+            <div style="color:#e33;font:bold 56px monospace;letter-spacing:12px;user-select:all">${room}</div>
+            <div style="color:#a66;font:14px monospace;margin:18px 0 10px">waiting for player 2… send them this link:</div>
+            <div style="display:flex;gap:8px;justify-content:center">
+              <input id="lobby-url" readonly value="${joinUrl}" style="width:340px;background:#1a1a1a;
+                color:#ddd;border:1px solid #822;font:12px monospace;padding:8px"/>
+              <button id="lobby-copy" style="padding:8px 16px;background:#822;color:#fff;border:none;
+                font:bold 14px monospace;cursor:pointer">COPY</button>
+            </div>
+          </div>`;
+        const urlBox = status.querySelector('#lobby-url') as HTMLInputElement;
+        const copyBtn = status.querySelector('#lobby-copy') as HTMLButtonElement;
+        urlBox.addEventListener('focus', () => urlBox.select());
+        copyBtn.addEventListener('click', () => {
+          urlBox.select();
+          navigator.clipboard?.writeText(joinUrl).catch(() => {});
+          copyBtn.textContent = 'COPIED!';
+          setTimeout(() => (copyBtn.textContent = 'COPY'), 1500);
+        });
       }, 300);
       const lobby = await netClient.connect(net.url, {
         room: net.room,

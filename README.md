@@ -44,10 +44,14 @@ npm run build       # once, or after pulling changes
 npm run server      # serves the game, the WAD, and the relay on :8666
 ```
 
-1. Player 1 opens `http://<host>:8666/?host` (add `&map=7` to pick the
-   map) and reads the 4-letter room code off the screen.
-2. Player 2 opens `http://<host>:8666/?room=CODE`.
-3. The game starts the moment player 2 joins.
+1. Both players open `http://<host>:8666/` — a start menu offers
+   SOLO GAME, HOST MULTIPLAYER (with a map picker), and JOIN GAME.
+2. The host clicks HOST MULTIPLAYER and sends the invite link (COPY
+   button) or the 4-letter room code.
+3. The friend pastes the link, or types the code into JOIN GAME.
+4. The game starts the moment player 2 joins.
+
+Direct URLs still work: `/?map=7` (solo), `/?host&map=7`, `/?room=CODE`.
 
 The host machine needs `DOOM2.WAD` in the project root; the server
 serves it to both browsers (so a friend needs nothing installed). For

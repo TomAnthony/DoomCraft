@@ -1,5 +1,8 @@
 // Boot entry.
-//   /             -> solo game (default MAP01, ?map=MAP07 or ?map=7)
+//   /             -> start menu (solo / host / join)
+//   /?map=7       -> straight into a solo game
+//   /?host&map=7  -> host a multiplayer room
+//   /?room=CODE   -> join a room
 //   /?view=walk   -> movement-only debug mode (no monsters)
 //   /?view=fly    -> free-fly camera
 //   /?view=wad    -> WAD asset debug viewer
@@ -8,6 +11,7 @@ import { runMapViewer } from './debug/mapviewer.ts';
 import { runPlayViewer } from './debug/playviewer.ts';
 import { runWadViewer } from './debug/wadviewer.ts';
 import { runGame } from './game/game.ts';
+import { showStartMenu } from './ui/menu.ts';
 
 const app = document.getElementById('app')!;
 const params = new URLSearchParams(location.search);
@@ -25,8 +29,12 @@ const net = server
   ? { url: server, room: params.get('room') ?? undefined }
   : undefined;
 
-const run =
-  params.get('view') === 'wad'
+// Bare URL: show the start menu instead of dropping into a game.
+const wantsGame = net || params.has('map') || params.has('view');
+
+const run = !wantsGame
+  ? (showStartMenu(app), Promise.resolve())
+  : params.get('view') === 'wad'
     ? runWadViewer(app)
     : params.get('view') === 'fly'
       ? runMapViewer(app, mapName)
