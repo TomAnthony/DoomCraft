@@ -249,10 +249,10 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
       automap.zoom(1.25);
     } else if (automap.visible && (e.code === 'Minus' || e.code === 'NumpadSubtract')) {
       automap.zoom(1 / 1.25);
-    } else if (e.code === 'F8') {
+    } else if (e.code === 'KeyI') {
       diagOn = !diagOn;
       diag.style.display = diagOn ? 'block' : 'none';
-    } else if (e.code === 'F7') {
+    } else if (e.code === 'KeyO') {
       autoTurn = !autoTurn;
     }
   });
@@ -672,7 +672,7 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
         diag.textContent =
           `fps ${(1000 / meanGap).toFixed(0)}  gap p95 ${gs[Math.floor(gs.length * 0.95)]!.toFixed(1)}ms max ${gs[gs.length - 1]!.toFixed(1)}ms\n` +
           `tics/s ${advancesShown}  backlog ${netClient ? netClient.bufferedAhead() : '-'}\n` +
-          `turn velCV ${cv}%  (F7 auto-turn ${autoTurn ? 'ON' : 'off'})`;
+          `turn velCV ${cv}%  (O = auto-turn ${autoTurn ? 'ON' : 'off'})`;
       }
     }
 
