@@ -222,6 +222,24 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
   });
 
   const hud = new HudView(store, wad, root);
+
+  // --- diagnostics (F8 overlay, F7 constant auto-turn through the real
+  // mouse path) for chasing look-smoothness issues on real machines
+  const diag = document.createElement('div');
+  diag.style.cssText =
+    'position:fixed;top:8px;right:8px;color:#8f8;display:none;text-align:right;' +
+    'font:12px monospace;text-shadow:1px 1px 0 #000;pointer-events:none;white-space:pre';
+  root.appendChild(diag);
+  let diagOn = false;
+  let autoTurn = false;
+  const frameGaps: number[] = [];
+  const yawVels: number[] = [];
+  let lastYawSum = 0;
+  let lastDiagT = 0;
+  let advancesThisSec = 0;
+  let advancesShown = 0;
+  let lastSecT = 0;
+
   const automap = new Automap(root);
   document.addEventListener('keydown', (e) => {
     if (e.code === 'Tab') {
@@ -231,6 +249,11 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
       automap.zoom(1.25);
     } else if (automap.visible && (e.code === 'Minus' || e.code === 'NumpadSubtract')) {
       automap.zoom(1 / 1.25);
+    } else if (e.code === 'F8') {
+      diagOn = !diagOn;
+      diag.style.display = diagOn ? 'block' : 'none';
+    } else if (e.code === 'F7') {
+      autoTurn = !autoTurn;
     }
   });
   const overlay = document.createElement('div');
@@ -531,11 +554,13 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
           netClient.advance(sim);
           postTic();
           lastAdvance = now;
+          advancesThisSec++;
         }
       } else {
         sim.runTic([input.buildTicCmd()]);
         postTic();
         lastAdvance = now;
+        advancesThisSec++;
       }
       acc -= TIC_MS;
       ran++;
@@ -561,7 +586,14 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
 
   renderer.setAnimationLoop(() => {
     const now = performance.now();
+    const frameGap = now - lastFrame;
     lastFrame = now;
+
+    // F7: constant-rate turn through the REAL mouse path (rate scaled by
+    // wall time so it should render perfectly smooth if the pipeline is)
+    if (autoTurn) {
+      (input as unknown as { mouseDx: number }).mouseDx += 0.3 * Math.min(frameGap, 50);
+    }
 
     if (netClient && netClient.peerLeft) {
       overlay.textContent = 'PEER DISCONNECTED';
@@ -611,6 +643,38 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
     sprites!.update(sim, camera, alpha, mo);
     blocksMesh!.sync(sim);
     updateBlockAids();
+
+    // diagnostics collection + 4Hz readout
+    if (diagOn) {
+      frameGaps.push(frameGap);
+      if (frameGaps.length > 240) frameGaps.shift();
+      const yawSum =
+        (mo.angle + queued.yaw + (input.pendingYawTurn() << 16)) | 0;
+      if (lastDiagT > 0 && now - lastDiagT > 0) {
+        yawVels.push((((yawSum - lastYawSum) | 0) / 65536) / (now - lastDiagT));
+        if (yawVels.length > 240) yawVels.shift();
+      }
+      lastYawSum = yawSum;
+      lastDiagT = now;
+      if (now - lastSecT > 1000) {
+        advancesShown = advancesThisSec;
+        advancesThisSec = 0;
+        lastSecT = now;
+      }
+      if (frameGaps.length > 30) {
+        const gs = [...frameGaps].sort((a, b) => a - b);
+        const meanGap = gs.reduce((a, b) => a + b, 0) / gs.length;
+        const vMean = yawVels.reduce((a, b) => a + b, 0) / (yawVels.length || 1);
+        const vStd = Math.sqrt(
+          yawVels.reduce((a, b) => a + (b - vMean) * (b - vMean), 0) / (yawVels.length || 1),
+        );
+        const cv = Math.abs(vMean) > 0.05 ? ((vStd / Math.abs(vMean)) * 100).toFixed(0) : '-';
+        diag.textContent =
+          `fps ${(1000 / meanGap).toFixed(0)}  gap p95 ${gs[Math.floor(gs.length * 0.95)]!.toFixed(1)}ms max ${gs[gs.length - 1]!.toFixed(1)}ms\n` +
+          `tics/s ${advancesShown}  backlog ${netClient ? netClient.bufferedAhead() : '-'}\n` +
+          `turn velCV ${cv}%  (F7 auto-turn ${autoTurn ? 'ON' : 'off'})`;
+      }
+    }
 
     renderer.clear();
     renderer.render(scene, camera);
