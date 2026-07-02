@@ -16,6 +16,12 @@ removed) as they land; anything sizeable also gets a SPEC.md update.
       machinery, added 2026-07-02, already reconstructs state from the log).
 - [ ] **Adaptive input delay** — the 3-tic lockstep delay is fixed; measure
       RTT and use 1–5.
+- [ ] **Sim in a Web Worker (Option B)** — the worker-clock watchdog keeps
+      the game ticking in backgrounded windows, but the sim still runs on
+      the main thread. Moving DoomSim + the WebSocket into a dedicated
+      worker (renderer consumes posted snapshots) would make netplay fully
+      immune to main-thread jank; requires a serialization boundary for
+      the renderer's direct mobj/sector access.
 - [ ] **Client-side movement prediction** — with lockstep, your own
       movement echoes ~86ms late (aim is latency-free, walking isn't).
       Prediction would remove the "swimming" feel on real internet links.

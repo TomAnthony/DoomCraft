@@ -154,7 +154,10 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
   }
 
   const renderer = new THREE.WebGLRenderer({ antialias: false });
-  renderer.setPixelRatio(window.devicePixelRatio);
+  // Doom's chunky pixels don't need Retina density, and 1x cuts GPU load
+  // ~4x on hidpi — the difference between judder and smoothness when two
+  // windows share one GPU (options can re-enable hi-res).
+  renderer.setPixelRatio(1);
   renderer.autoClear = false;
   root.style.background = '#000';
   const canvas = renderer.domElement;
@@ -199,6 +202,10 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
     },
     (locked) => {
       aspectLock = locked;
+      applySize();
+    },
+    (hires) => {
+      renderer.setPixelRatio(hires ? window.devicePixelRatio : 1);
       applySize();
     },
   );
@@ -410,6 +417,15 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
   // debug handle for scripted verification (harmless in production)
   (window as unknown as { __dc: unknown }).__dc = {
     sim,
+    input,
+    look: () => ({
+      angle: localPlayer().mo!.angle,
+      queued: netClient ? netClient.pendingLocalTurn().yaw : 0,
+      pending: input.pendingYawTurn() << 16,
+      cam: camera.rotation.y,
+      simTic: netClient?.simTic ?? -1,
+      sendTic: netClient?.sendTic ?? -1,
+    }),
     exit: () => sim.exitLevel(),
     kill: () => sim.damageMobj(localPlayer().mo!, null, null, 10000),
     where: () => ({
@@ -527,14 +543,21 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
     if (ran === 4) acc = 0;
   }
 
-  // Watchdog: browsers throttle rAF in unfocused/occluded windows, which
-  // would starve the peer of our cmds (two-windows-on-one-machine testing,
-  // or a backgrounded player). Keep the game ticking regardless.
-  const watchdog = window.setInterval(() => {
+  // Watchdog: browsers throttle rAF AND main-thread timers in hidden/
+  // backgrounded windows (down to 1/sec, or 1/min under intensive
+  // throttling), which would starve the peer of our cmds. Timers inside
+  // a dedicated Web Worker are NOT visibility-throttled, so a tiny
+  // worker acts as the clock; its messages arrive promptly even in
+  // background tabs and drive the sim whenever rAF has stalled.
+  const clockWorker = new Worker(
+    URL.createObjectURL(
+      new Blob(['setInterval(() => postMessage(0), 28);'], { type: 'text/javascript' }),
+    ),
+  );
+  clockWorker.onmessage = () => {
     const now = performance.now();
     if (now - lastFrame > 80) pumpTics(now);
-  }, 28);
-  void watchdog;
+  };
 
   renderer.setAnimationLoop(() => {
     const now = performance.now();
