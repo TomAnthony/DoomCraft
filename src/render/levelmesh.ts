@@ -53,15 +53,121 @@ export class LevelMesh {
   private readonly spriteTable: SpriteTable;
   private readonly spriteMaterials = new Map<string, THREE.ShaderMaterial>();
 
+  /** last applied per-sector values for dynamic updates */
+  private lastFloor: Float64Array;
+  private lastCeil: Float64Array;
+  private lastLight: Float64Array;
+  private readonly dynamic: boolean;
+
   constructor(
     private readonly map: MapData,
     private readonly store: TextureStore,
     wad: WadFile,
+    opts?: { dynamic?: boolean },
   ) {
+    this.dynamic = opts?.dynamic ?? false;
     this.spriteTable = buildSpriteTable(wad);
+    this.lastFloor = new Float64Array(map.sectors.length);
+    this.lastCeil = new Float64Array(map.sectors.length);
+    this.lastLight = new Float64Array(map.sectors.length);
+    map.sectors.forEach((s, i) => {
+      this.lastFloor[i] = s.floorHeight;
+      this.lastCeil[i] = s.ceilingHeight;
+      this.lastLight[i] = s.lightLevel;
+    });
     this.buildFlats();
     this.buildWalls();
-    this.buildThings();
+    if (!this.dynamic) this.buildThings();
+  }
+
+  /**
+   * Apply interpolated sector floor/ceiling heights (world units) and
+   * light levels. Only geometry belonging to changed sectors is touched.
+   */
+  updateSectors(floors: Float64Array, ceils: Float64Array, lights: Float64Array): void {
+    const changed = new Set<number>();
+    for (let i = 0; i < floors.length; i++) {
+      if (
+        floors[i] !== this.lastFloor[i] ||
+        ceils[i] !== this.lastCeil[i] ||
+        lights[i] !== this.lastLight[i]
+      ) {
+        changed.add(i);
+      }
+    }
+    if (changed.size === 0) return;
+
+    for (const { geometry, ranges } of this.flatRanges.values()) {
+      const pos = geometry.getAttribute('position') as THREE.BufferAttribute;
+      const light = geometry.getAttribute('light') as THREE.BufferAttribute;
+      let dirty = false;
+      for (const r of ranges) {
+        if (!changed.has(r.sector)) continue;
+        const h = r.plane === 'floor' ? floors[r.sector]! : ceils[r.sector]!;
+        const l = lights[r.sector]!;
+        for (let v = r.vertexStart; v < r.vertexStart + r.vertexCount; v++) {
+          pos.setY(v, h);
+          light.setX(v, l);
+        }
+        dirty = true;
+      }
+      if (dirty) {
+        pos.needsUpdate = true;
+        light.needsUpdate = true;
+      }
+    }
+
+    for (const [texName, { geometry, ranges }] of this.wallRanges) {
+      const entry = this.store.wallTexture(texName)!;
+      const pos = geometry.getAttribute('position') as THREE.BufferAttribute;
+      const uv = geometry.getAttribute('uv') as THREE.BufferAttribute;
+      const light = geometry.getAttribute('light') as THREE.BufferAttribute;
+      let dirty = false;
+      for (const { quad, vertexStart } of ranges) {
+        const bindsChanged =
+          (quad.bindings.top && changed.has(quad.bindings.top.sector)) ||
+          (quad.bindings.bottom && changed.has(quad.bindings.bottom.sector)) ||
+          (quad.vtopBind && changed.has(quad.vtopBind.sector)) ||
+          changed.has(quad.lightSector);
+        if (!bindsChanged) continue;
+
+        const heightOf = (b: { sector: number; plane: 'floor' | 'ceiling' }) =>
+          b.plane === 'floor' ? floors[b.sector]! : ceils[b.sector]!;
+        const bottom = quad.bindings.bottom ? heightOf(quad.bindings.bottom) : quad.bottom;
+        let top = quad.bindings.top ? heightOf(quad.bindings.top) : quad.top;
+        if (top < bottom) top = bottom; // degenerate (closed) section
+        const vTop = quad.vtopBind
+          ? heightOf(quad.vtopBind) + quad.vtopBind.add
+          : quad.vTop;
+
+        pos.setY(vertexStart, bottom);
+        pos.setY(vertexStart + 1, bottom);
+        pos.setY(vertexStart + 2, top);
+        pos.setY(vertexStart + 3, top);
+        const h = entry.height;
+        uv.setY(vertexStart, (vTop - bottom) / h);
+        uv.setY(vertexStart + 1, (vTop - bottom) / h);
+        uv.setY(vertexStart + 2, (vTop - top) / h);
+        uv.setY(vertexStart + 3, (vTop - top) / h);
+
+        let l = lights[quad.lightSector]!;
+        if (quad.y1 === quad.y2) l = Math.max(0, l - 16);
+        else if (quad.x1 === quad.x2) l = Math.min(255, l + 16);
+        for (let v = vertexStart; v < vertexStart + 4; v++) light.setX(v, l);
+        dirty = true;
+      }
+      if (dirty) {
+        pos.needsUpdate = true;
+        uv.needsUpdate = true;
+        light.needsUpdate = true;
+      }
+    }
+
+    for (const i of changed) {
+      this.lastFloor[i] = floors[i]!;
+      this.lastCeil[i] = ceils[i]!;
+      this.lastLight[i] = lights[i]!;
+    }
   }
 
   // --- flats ------------------------------------------------------------
@@ -130,7 +236,7 @@ export class LevelMesh {
     for (const [name, def] of this.store.wallDefs) {
       sizes.set(name, { width: def.width, height: def.height });
     }
-    const quads = buildWallQuads(this.map, sizes);
+    const quads = buildWallQuads(this.map, sizes, this.dynamic);
     const groups = new Map<string, { positions: number[]; uvs: number[]; lights: number[]; indices: number[]; ranges: WallRange[]; masked: boolean }>();
 
     for (const quad of quads) {

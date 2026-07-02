@@ -43,6 +43,11 @@ export interface WallQuad {
    * texture height, so vTop is its top edge.
    */
   readonly vTop: number;
+  /**
+   * Dynamic vTop rule: vTop = heights[sector][plane] + add (which
+   * already includes rowOffset). null = quad.vTop is static.
+   */
+  readonly vtopBind: { sector: number; plane: 'floor' | 'ceiling'; add: number } | null;
   /** Sector providing light level for this quad. */
   readonly lightSector: number;
   /** Two-sided middle quads don't tile vertically and use alpha testing. */
@@ -57,6 +62,9 @@ export interface TextureSize {
 export function buildWallQuads(
   map: MapData,
   textureSizes: ReadonlyMap<string, TextureSize>,
+  // Keep zero-height upper/lower sections (closed doors) so the
+  // renderer can animate them open later.
+  includeDegenerate = false,
 ): WallQuad[] {
   const quads: WallQuad[] = [];
 
@@ -87,14 +95,17 @@ export function buildWallQuads(
         top: number,
         vTop: number,
         bindings: WallQuad['bindings'],
+        vtopBind: WallQuad['vtopBind'],
         masked = false,
       ) => {
-        if (texture === '-' || top <= bottom) return;
+        if (texture === '-') return;
+        if (top <= bottom && !(includeDegenerate && kind !== 'midtwo')) return;
         quads.push({
           texture, kind, linedef: li, side,
           x1: ax, y1: ay, x2: bx, y2: by,
           bottom, top, bindings, u1, u2,
           vTop: vTop + sd.rowOffset,
+          vtopBind,
           lightSector: sd.sector,
           masked,
         });
@@ -105,14 +116,15 @@ export function buildWallQuads(
         // texture top to the ceiling; lower-unpegged pegs its bottom to
         // the floor (texture top = floor + texHeight).
         const tex = textureSizes.get(sd.midTexture);
-        const vTop =
-          ld.flags & ML_DONTPEGBOTTOM
-            ? front.floorHeight + (tex?.height ?? 128)
-            : front.ceilingHeight;
+        const texH = tex?.height ?? 128;
+        const unpegged = (ld.flags & ML_DONTPEGBOTTOM) !== 0;
+        const vTop = unpegged ? front.floorHeight + texH : front.ceilingHeight;
         push('middle', sd.midTexture, front.floorHeight, front.ceilingHeight, vTop, {
           top: { sector: sd.sector, plane: 'ceiling' },
           bottom: { sector: sd.sector, plane: 'floor' },
-        });
+        }, unpegged
+          ? { sector: sd.sector, plane: 'floor', add: texH + sd.rowOffset }
+          : { sector: sd.sector, plane: 'ceiling', add: sd.rowOffset });
         continue;
       }
 
@@ -121,28 +133,31 @@ export function buildWallQuads(
       // Upper section: between the two ceilings. Default pegs the texture
       // bottom to the lower ceiling; upper-unpegged pegs its top to the
       // higher ceiling.
-      if (back.ceilingHeight < front.ceilingHeight) {
+      if (back.ceilingHeight < front.ceilingHeight || includeDegenerate) {
         const tex = textureSizes.get(sd.topTexture);
-        const vTop =
-          ld.flags & ML_DONTPEGTOP
-            ? front.ceilingHeight
-            : back.ceilingHeight + (tex?.height ?? 128);
+        const texH = tex?.height ?? 128;
+        const pegged = (ld.flags & ML_DONTPEGTOP) !== 0;
+        const vTop = pegged ? front.ceilingHeight : back.ceilingHeight + texH;
         push('upper', sd.topTexture, back.ceilingHeight, front.ceilingHeight, vTop, {
           top: { sector: sd.sector, plane: 'ceiling' },
           bottom: { sector: other.sector, plane: 'ceiling' },
-        });
+        }, pegged
+          ? { sector: sd.sector, plane: 'ceiling', add: sd.rowOffset }
+          : { sector: other.sector, plane: 'ceiling', add: texH + sd.rowOffset });
       }
 
       // Lower section: between the two floors. Default pegs the texture
       // top to the higher floor; lower-unpegged draws it as if it started
       // at the (front) ceiling.
-      if (back.floorHeight > front.floorHeight) {
-        const vTop =
-          ld.flags & ML_DONTPEGBOTTOM ? front.ceilingHeight : back.floorHeight;
+      if (back.floorHeight > front.floorHeight || includeDegenerate) {
+        const unpegged = (ld.flags & ML_DONTPEGBOTTOM) !== 0;
+        const vTop = unpegged ? front.ceilingHeight : back.floorHeight;
         push('lower', sd.bottomTexture, front.floorHeight, back.floorHeight, vTop, {
           top: { sector: other.sector, plane: 'floor' },
           bottom: { sector: sd.sector, plane: 'floor' },
-        });
+        }, unpegged
+          ? { sector: sd.sector, plane: 'ceiling', add: sd.rowOffset }
+          : { sector: other.sector, plane: 'floor', add: sd.rowOffset });
       }
 
       // Two-sided middle (masked, e.g. grates): clamped to one texture
@@ -167,6 +182,7 @@ export function buildWallQuads(
             texture: sd.midTexture, kind: 'midtwo', linedef: li, side,
             x1: ax, y1: ay, x2: bx, y2: by,
             bottom, top, u1, u2, vTop: top,
+            vtopBind: null,
             // Masked middles don't stretch with the sector in vanilla.
             bindings: { top: null, bottom: null },
             lightSector: sd.sector,

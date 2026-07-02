@@ -13,7 +13,7 @@ import {
   SlopeType,
 } from './defs.ts';
 import { FRACUNIT, FixedMul, type Fixed } from './fixed.ts';
-import { MF, MT } from './data/info.gen.ts';
+import { MF, MT, S } from './data/info.gen.ts';
 import {
   aproxDistance, pointInSubsector, pointOnLineSide,
   boxOnLineSide, setThingPosition, unsetThingPosition, PT_ADDLINES,
@@ -21,13 +21,16 @@ import {
 } from './maputl.ts';
 import type { DoomRandom } from './random.ts';
 import type { World } from './setup.ts';
-import type { Line, Mobj } from './world.ts';
+import { Mobj, type Line, type Sector } from './world.ts';
 
 export interface PMapHooks {
   damageMobj(target: Mobj, inflictor: Mobj | null, source: Mobj | null, damage: number): void;
   touchSpecialThing(special: Mobj, toucher: Mobj): void;
   crossSpecialLine(line: Line, side: number, thing: Mobj): void;
   setMobjState(mobj: Mobj, stateNum: number): boolean;
+  removeMobj(mobj: Mobj): void;
+  spawnMobj(x: Fixed, y: Fixed, z: Fixed, type: number): Mobj;
+  leveltime(): number;
 }
 
 const noopHooks: PMapHooks = {
@@ -35,6 +38,9 @@ const noopHooks: PMapHooks = {
   touchSpecialThing: () => {},
   crossSpecialLine: () => {},
   setMobjState: () => true,
+  removeMobj: () => {},
+  spawnMobj: () => new Mobj(),
+  leveltime: () => 0,
 };
 
 export class PMap {
@@ -328,6 +334,62 @@ export class PMap {
       thing.z = (thing.ceilingz - thing.height) | 0;
     }
     return thing.ceilingz - thing.floorz >= thing.height;
+  }
+
+  // --- sector height changing (P_ChangeSector) -------------------------------
+
+  private crushchange = false;
+  private nofit = false;
+
+  private changeSectorPit(thing: Mobj): boolean {
+    if (this.thingHeightClip(thing)) {
+      return true; // keep checking
+    }
+
+    // crunch bodies to giblets
+    if (thing.health <= 0) {
+      this.hooks.setMobjState(thing, S.GIBS);
+      thing.flags &= ~MF.SOLID;
+      thing.height = 0;
+      thing.radius = 0;
+      return true;
+    }
+
+    // crunch dropped items
+    if (thing.flags & MF.DROPPED) {
+      this.hooks.removeMobj(thing);
+      return true;
+    }
+
+    if (!(thing.flags & MF.SHOOTABLE)) {
+      return true; // assume it is bloody gibs or something
+    }
+
+    this.nofit = true;
+
+    if (this.crushchange && !(this.hooks.leveltime() & 3)) {
+      this.hooks.damageMobj(thing, null, null, 10);
+      // spray blood in a random direction
+      const mo = this.hooks.spawnMobj(
+        thing.x, thing.y, (thing.z + ((thing.height / 2) | 0)) | 0, MT.BLOOD,
+      );
+      mo.momx = this.rng.pSubRandom() << 12;
+      mo.momy = this.rng.pSubRandom() << 12;
+    }
+    return true; // keep checking (crush other things)
+  }
+
+  changeSector(sector: Sector, crunch: boolean): boolean {
+    this.nofit = false;
+    this.crushchange = crunch;
+
+    // re-check heights for all things near the moving sector
+    for (let x = sector.blockbox[BOXLEFT]!; x <= sector.blockbox[BOXRIGHT]!; x++) {
+      for (let y = sector.blockbox[BOXBOTTOM]!; y <= sector.blockbox[BOXTOP]!; y++) {
+        this.tr.blockThingsIterator(x, y, (t) => this.changeSectorPit(t));
+      }
+    }
+    return this.nofit;
   }
 
   // --- slide move -----------------------------------------------------------

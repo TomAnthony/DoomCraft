@@ -15,7 +15,8 @@ export function makeSky(store: TextureStore, mapName: string): THREE.Mesh | null
   const entry = store.wallTexture(skyNameForMap(mapName));
   if (!entry) return null;
   const radius = 8192;
-  const geometry = new THREE.CylinderGeometry(radius, radius, radius * 1.2, 32, 1, true);
+  // Tall enough that looking up at max pitch never sees past the rim.
+  const geometry = new THREE.CylinderGeometry(radius, radius, radius * 3, 32, 1, true);
   const texture = entry.texture.clone();
   texture.needsUpdate = true;
   texture.repeat.set(4, 1); // vanilla sky tiles 4x around

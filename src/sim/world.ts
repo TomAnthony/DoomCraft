@@ -149,6 +149,14 @@ export class Mobj {
   think: () => void = () => {};
 }
 
+/** Player weapon overlay sprite (pspdef_t). stateNum 0 = inactive. */
+export class PspDef {
+  stateNum = 0;
+  tics = 0;
+  sx: Fixed = 0;
+  sy: Fixed = 0;
+}
+
 export class Player {
   mo: Mobj | null = null;
   playerstate: PlayerState = PlayerState.Reborn;
@@ -169,7 +177,7 @@ export class Player {
   armorpoints = 0;
   armortype = 0;
   readyweapon = 1; // wp_pistol
-  pendingweapon = -1; // wp_nochange marker handled later (M4)
+  pendingweapon = 9; // wp_nochange
   usedown = false;
   attackdown = false;
   refire = 0;
@@ -178,7 +186,24 @@ export class Player {
   attacker: Mobj | null = null;
   extralight = 0;
   fixedcolormap = 0;
-  frags = 0;
+  /** frags[opponentIndex] — vanilla per-player frag counts */
+  frags: number[] = [0, 0];
+  /** invuln, strength, invisibility, ironfeet, allmap, infrared (tics) */
+  powers: number[] = [0, 0, 0, 0, 0, 0];
+  weaponowned: boolean[] = [true, true, false, false, false, false, false, false, false];
+  ammo: number[] = [50, 0, 0, 0];
+  maxammo: number[] = [200, 50, 300, 50];
+  backpack = false;
+  killcount = 0;
+  itemcount = 0;
+  /** weapon overlay sprites: [ps_weapon, ps_flash] */
+  psprites: PspDef[] = [new PspDef(), new PspDef()];
+  /** keycards/skulls: it_bluecard,yellowcard,redcard,blueskull,yellowskull,redskull */
+  cards: boolean[] = [false, false, false, false, false, false];
+  /** hint messages (C player->message); read/cleared by the UI layer */
+  message: string | null = null;
+  /** secret sectors found (sector special 9) */
+  secretcount = 0;
   readonly index: number;
   constructor(index: number) {
     this.index = index;

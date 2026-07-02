@@ -6,6 +6,7 @@ import {
   BT2_JUMP, BT_CHANGE, BT_USE, BT_WEAPONMASK, BT_WEAPONSHIFT,
   JUMPSPEED, PlayerState, VIEWHEIGHT,
 } from './defs.ts';
+import { Power, Weapon } from './items.ts';
 import { FRACBITS, FRACUNIT, FixedMul, type Fixed } from './fixed.ts';
 import { pointToAngle2 } from './angles.ts';
 import {
@@ -155,10 +156,29 @@ export function playerThink(sim: DoomSim, player: Player): void {
     sim.playerInSpecialSector(player);
   }
 
-  // Check for weapon change (applied by the psprite machinery in M4).
+  // Check for weapon change; the psprite machinery applies it when the
+  // weapon can (not mid-attack).
   if (cmd.buttons & BT_CHANGE) {
-    const newweapon = (cmd.buttons & BT_WEAPONMASK) >> BT_WEAPONSHIFT;
-    player.pendingweapon = newweapon;
+    let newweapon = (cmd.buttons & BT_WEAPONMASK) >> BT_WEAPONSHIFT;
+
+    if (
+      newweapon === Weapon.Fist &&
+      player.weaponowned[Weapon.Chainsaw] &&
+      !(player.readyweapon === Weapon.Chainsaw && player.powers[Power.Strength])
+    ) {
+      newweapon = Weapon.Chainsaw;
+    }
+    if (
+      newweapon === Weapon.Shotgun &&
+      player.weaponowned[Weapon.SuperShotgun] &&
+      player.readyweapon !== Weapon.SuperShotgun
+    ) {
+      newweapon = Weapon.SuperShotgun;
+    }
+
+    if (player.weaponowned[newweapon] && newweapon !== player.readyweapon) {
+      player.pendingweapon = newweapon;
+    }
   }
 
   // check for use
@@ -174,6 +194,32 @@ export function playerThink(sim: DoomSim, player: Player): void {
   // cycle psprites
   sim.movePsprites(player);
 
+  // Counters, time dependent power ups.
+  if (player.powers[Power.Strength]) player.powers[Power.Strength]!++;
+  if (player.powers[Power.Invulnerability]) player.powers[Power.Invulnerability]!--;
+  if (player.powers[Power.Invisibility]) {
+    if (!--player.powers[Power.Invisibility]!) mo.flags &= ~MF.SHADOW;
+  }
+  if (player.powers[Power.Infrared]) player.powers[Power.Infrared]!--;
+  if (player.powers[Power.IronFeet]) player.powers[Power.IronFeet]!--;
+
   if (player.damagecount) player.damagecount--;
   if (player.bonuscount) player.bonuscount--;
+
+  // Handling colormaps (INVERSECOLORMAP = 32).
+  if (player.powers[Power.Invulnerability]) {
+    if (player.powers[Power.Invulnerability]! > 4 * 32 || player.powers[Power.Invulnerability]! & 8) {
+      player.fixedcolormap = 32;
+    } else {
+      player.fixedcolormap = 0;
+    }
+  } else if (player.powers[Power.Infrared]) {
+    if (player.powers[Power.Infrared]! > 4 * 32 || player.powers[Power.Infrared]! & 8) {
+      player.fixedcolormap = 1; // almost full bright
+    } else {
+      player.fixedcolormap = 0;
+    }
+  } else {
+    player.fixedcolormap = 0;
+  }
 }

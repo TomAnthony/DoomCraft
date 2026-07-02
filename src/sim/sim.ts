@@ -83,6 +83,9 @@ export class DoomSim {
       touchSpecialThing: (sp, to) => this.touchSpecialThing(sp, to),
       crossSpecialLine: (l, side, th) => this.crossSpecialLine(l, side, th),
       setMobjState: (m, s) => this.setMobjState(m, s),
+      removeMobj: (m) => this.removeMobj(m),
+      spawnMobj: (x, y, z, type) => this.spawnMobj(x, y, z, type),
+      leveltime: () => this.leveltime,
     };
     this.pmap.gamemap = gamemap;
     this.gamemap = gamemap;
@@ -103,7 +106,10 @@ export class DoomSim {
 
     for (let i = 0; i < MAXPLAYERS; i++) {
       if (this.playeringame[i]) {
-        this.players[i]!.playerstate = PlayerState.Reborn;
+        // Fresh players are reborn (pistol start); players carried over
+        // from a previous level keep their inventory (vanilla co-op).
+        if (!this.players[i]!.mo) this.players[i]!.playerstate = PlayerState.Reborn;
+        this.players[i]!.mo = null;
         this.spawnPlayer(i);
       }
     }
@@ -295,6 +301,14 @@ export class DoomSim {
   spawnPlayerMissile: (source: Mobj, type: number) => void = () => {};
   radiusAttack: (spot: Mobj, source: Mobj | null, damage: number) => void = () => {};
   checkSight: (t1: Mobj, t2: Mobj) => boolean = () => false;
+  /** P_NoiseAlert (p_enemy.c) — wakes monsters when a weapon fires */
+  noiseAlert: (target: Mobj, emitter: Mobj) => void = () => {};
+  /** P_SpawnPuff (combat.ts) — used by A_Tracer's smoke */
+  spawnPuff: (x: Fixed, y: Fixed, z: Fixed) => void = () => {};
+  /** A_BossDeath floor triggers (wired to the specials module) */
+  bossDeathFloor: (kind: 'lowerFloorToLowest' | 'raiseToTexture', tag: number) => void = () => {};
+  /** A_KeenDie door-open trigger (wired to the specials module) */
+  keenDoorOpen: (tag: number) => void = () => {};
 
   crossSpecialLine: (line: Line, side: number, thing: Mobj) => void = () => {};
   shootSpecialLine: (thing: Mobj, line: Line) => void = () => {};
