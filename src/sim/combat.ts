@@ -17,6 +17,7 @@ import {
   pointOnLineSide as pointOnLineSideOf, type Intercept,
 } from './maputl.ts';
 import { ANGLETOFINESHIFT, finecosine, finesine, finetangent } from './tables.ts';
+import type { BlockTraceHit } from '../blocks/grid.ts';
 import type { DoomSim } from './sim.ts';
 import type { Mobj, Player } from './world.ts';
 
@@ -43,8 +44,29 @@ class Combat {
   private bombsource: Mobj | null = null;
   private bombspot!: Mobj;
   private bombdamage = 0;
+  /** blocks choke point 3: nearest voxel hit along the current shot */
+  private blockHit: BlockTraceHit | null = null;
 
   constructor(private readonly sim: DoomSim) {}
+
+  /** Bullet strikes a voxel block: puff on the face, damage the block. */
+  private hitBlockCell(): void {
+    const hit = this.blockHit!;
+    this.blockHit = null;
+    const trace = this.sim.tr.trace;
+    // frac is in FRACUNIT over the same trace segment
+    const frac = (hit.frac - FixedDiv(4 * FRACUNIT, this.attackrange)) | 0;
+    const x = (trace.x + FixedMul(trace.dx, frac)) | 0;
+    const y = (trace.y + FixedMul(trace.dy, frac)) | 0;
+    const z = (this.shootz + FixedMul(this.aimslope, FixedMul(frac, this.attackrange))) | 0;
+    this.spawnPuff(x, y, z);
+    if (this.laDamage) {
+      const destroyed = this.sim.blocks.damage(hit.bx, hit.by, hit.bz, this.laDamage);
+      if (destroyed) {
+        this.sim.startSoundXY(x, y, 'barexp');
+      }
+    }
+  }
 
   // --- aim ------------------------------------------------------------------
 
@@ -119,6 +141,12 @@ class Combat {
   private shootTraverse(inx: Intercept): boolean {
     const sim = this.sim;
     const trace = sim.tr.trace;
+
+    // A voxel block sits nearer than this intercept: shoot it instead.
+    if (this.blockHit && inx.frac > this.blockHit.frac) {
+      this.hitBlockCell();
+      return false;
+    }
 
     if (inx.line) {
       const li = inx.line;
@@ -202,11 +230,19 @@ class Combat {
     this.attackrange = distance;
     this.aimslope = slope;
 
-    this.sim.tr.pathTraverse(
+    this.blockHit = null;
+    if (this.sim.blocks.count) {
+      const z2 = (this.shootz + FixedMul(slope, distance)) | 0;
+      this.blockHit = this.sim.blocks.trace(t1.x, t1.y, this.shootz, x2, y2, z2);
+    }
+
+    const completed = this.sim.tr.pathTraverse(
       t1.x, t1.y, x2, y2,
       PT_ADDLINES | PT_ADDTHINGS,
       (i) => this.shootTraverse(i),
     );
+    // nothing else stopped the shot but a block was in the way
+    if (completed && this.blockHit) this.hitBlockCell();
   }
 
   // --- use lines -----------------------------------------------------------------
@@ -253,9 +289,18 @@ class Combat {
     if (dist < 0) dist = 0;
     if (dist >= this.bombdamage) return true; // out of range
 
-    if (this.sim.checkSight(thing, this.bombspot)) {
+    // Blocks deviation: splash penetrates block walls with per-depth
+    // attenuation, so radius attacks use the block-blind sight check and
+    // subtract the attenuation instead.
+    let damage = this.bombdamage - dist;
+    if (this.sim.splashAtten) {
+      damage -= this.sim.splashAtten(this.bombspot, thing);
+      if (damage <= 0) return true;
+    }
+    const sight = this.sim.checkSightBase ?? this.sim.checkSight;
+    if (sight(thing, this.bombspot)) {
       // must be in direct path
-      this.sim.damageMobj(thing, this.bombspot, this.bombsource, this.bombdamage - dist);
+      this.sim.damageMobj(thing, this.bombspot, this.bombsource, damage);
     }
     return true;
   }

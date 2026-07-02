@@ -6,6 +6,7 @@
 // in the tic that spawned them.
 
 import type { MapData } from '../wad/maps.ts';
+import { BlockGrid } from '../blocks/grid.ts';
 import { MF, MT, mobjinfo, states, type StateRow } from './data/info.gen.ts';
 import { sfxinfo } from './data/sounds.gen.ts';
 import {
@@ -57,10 +58,14 @@ export class DoomSim {
   /** all thinkers (mobjs + sector movers) in vanilla execution order */
   readonly thinkers = new ThinkerList();
 
+  /** DoomCraft voxel blocks (part of deterministic state) */
+  readonly blocks = new BlockGrid();
+
   /** sound events emitted this tic (read by the audio layer; not state) */
   soundEvents: SoundEvent[] = [];
 
-  readonly stateTable: readonly StateRow[] = states;
+  /** shared states; the block-gun module appends its custom states */
+  stateTable: readonly StateRow[] = states;
 
   /** action dispatch (populated as systems land; missing = no-op in M3) */
   actions = new Map<string, (sim: DoomSim, mobj: Mobj) => void>();
@@ -87,11 +92,13 @@ export class DoomSim {
       spawnMobj: (x, y, z, type) => this.spawnMobj(x, y, z, type),
       leveltime: () => this.leveltime,
     };
+    this.pmap.adjustHeights = this.blockAdjust;
     this.pmap.gamemap = gamemap;
     this.gamemap = gamemap;
     this.leveltime = 0;
     this.thinkers.head = this.thinkers.tail = null;
     this.thinkers.count = 0;
+    this.blocks.clear();
     this.playerstarts = [null, null, null, null];
 
     // P_LoadThings: player starts always recorded; other things
@@ -305,6 +312,12 @@ export class DoomSim {
   noiseAlert: (target: Mobj, emitter: Mobj) => void = () => {};
   /** P_SpawnPuff (combat.ts) — used by A_Tracer's smoke */
   spawnPuff: (x: Fixed, y: Fixed, z: Fixed) => void = () => {};
+  /** blocks: splash damage attenuation by intervening block depth */
+  splashAtten: ((spot: Mobj, thing: Mobj) => number) | null = null;
+  /** blocks: movement gap adjust, re-wired onto each level's PMap */
+  blockAdjust: ((thing: Mobj, x: Fixed, y: Fixed) => void) | null = null;
+  /** blocks: sight check WITHOUT block occlusion (radius attacks use it) */
+  checkSightBase: ((t1: Mobj, t2: Mobj) => boolean) | null = null;
   /** A_BossDeath floor triggers (wired to the specials module) */
   bossDeathFloor: (kind: 'lowerFloorToLowest' | 'raiseToTexture', tag: number) => void = () => {};
   /** A_KeenDie door-open trigger (wired to the specials module) */
@@ -336,6 +349,10 @@ export class DoomSim {
       y: mobj ? mobj.y : 0,
       mobj,
     });
+  }
+
+  startSoundXY(x: Fixed, y: Fixed, name: string): void {
+    this.soundEvents.push({ name, x, y, mobj: null });
   }
 
   startSoundNum(mobj: Mobj | null, sfxId: number): void {

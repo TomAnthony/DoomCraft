@@ -72,9 +72,17 @@ export class InputHandler {
     if (this.keys.has('KeyD')) cmd.sidemove += SIDEMOVE;
     if (this.keys.has('KeyA')) cmd.sidemove -= SIDEMOVE;
 
+    // keyboard look/turn (arrows)
+    let kbYaw = 0;
+    let kbPitch = 0;
+    if (this.keys.has('ArrowLeft')) kbYaw += 1000;
+    if (this.keys.has('ArrowRight')) kbYaw -= 1000;
+    if (this.keys.has('ArrowUp')) kbPitch += 500;
+    if (this.keys.has('ArrowDown')) kbPitch -= 500;
+
     const clamp16 = (v: number) => Math.max(-32768, Math.min(32767, v | 0));
-    cmd.angleturn = clamp16(-this.mouseDx * YAW_SCALE);
-    cmd.pitch = clamp16(-this.mouseDy * PITCH_SCALE);
+    cmd.angleturn = clamp16(-this.mouseDx * YAW_SCALE + kbYaw);
+    cmd.pitch = clamp16(-this.mouseDy * PITCH_SCALE + kbPitch);
     this.mouseDx = 0;
     this.mouseDy = 0;
 

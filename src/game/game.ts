@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { AudioPlayer } from '../audio/audio.ts';
 import { InputHandler } from '../input/input.ts';
+import { BlocksMesh } from '../render/blocksmesh.ts';
 import { HudView } from '../render/hud.ts';
 import { LevelMesh } from '../render/levelmesh.ts';
 import { MobjSprites } from '../render/mobjsprites.ts';
@@ -157,6 +158,7 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
   let mapData: MapData;
   let level: LevelMesh | null = null;
   let sprites: MobjSprites | null = null;
+  let blocksMesh: BlocksMesh | null = null;
   let sky: THREE.Mesh | null = null;
   let scene = new THREE.Scene();
 
@@ -209,6 +211,8 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
     scene.add(level.group);
     sprites = new MobjSprites(store, wad);
     scene.add(sprites.group);
+    blocksMesh = new BlocksMesh();
+    scene.add(blocksMesh.mesh);
     sky = makeSky(store, name);
     if (sky) scene.add(sky);
 
@@ -333,6 +337,7 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
 
     if (sky) sky.position.copy(camera.position);
     sprites!.update(sim, camera, alpha, mo);
+    blocksMesh!.sync(sim.blocks);
 
     renderer.clear();
     renderer.render(scene, camera);

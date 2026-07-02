@@ -33,7 +33,16 @@ type PspAction = (sim: DoomSim, player: Player, psp: PspDef) => void;
 
 const pspActions = new Map<string, PspAction>();
 
-function setPsprite(sim: DoomSim, player: Player, position: number, stnum: number): void {
+/** Extension hook (block gun): add custom psprite actions. */
+export function registerPspAction(name: string, fn: PspAction): void {
+  pspActions.set(name, fn);
+}
+
+export function getPspAction(name: string): PspAction | undefined {
+  return pspActions.get(name);
+}
+
+export function setPsprite(sim: DoomSim, player: Player, position: number, stnum: number): void {
   const psp = player.psprites[position]!;
   do {
     if (!stnum) {
@@ -405,6 +414,18 @@ function bfgSpray(sim: DoomSim, mo: Mobj): void {
 
     let damage = 0;
     for (let j = 0; j < 15; j++) damage += (sim.rng.pRandom() & 7) + 1;
+
+    // Blocks deviation: spray rays attenuate through block walls —
+    // behind 4+ blocks of depth the ray does nothing.
+    if (sim.blocks.count > 0) {
+      const depth = sim.blocks.depthBetween(
+        mo.x, mo.y, (mo.z + (mo.height >> 1)) | 0,
+        sim.linetarget.x, sim.linetarget.y,
+        (sim.linetarget.z + (sim.linetarget.height >> 1)) | 0,
+      );
+      damage = ((damage * Math.max(0, 4 - depth)) / 4) | 0;
+      if (damage <= 0) continue;
+    }
     sim.damageMobj(sim.linetarget, mo.target, mo.target, damage);
   }
 }

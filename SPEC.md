@@ -45,6 +45,7 @@ player positions *(planned)*.
 | Input | Action |
 | --- | --- |
 | Mouse X / Y (pointer lock) | Turn / look up-down |
+| Arrow keys | Keyboard turn / look |
 | W / S | Forward / back |
 | A / D | Strafe left / right |
 | Left click | Fire (block gun: place block) |
@@ -53,7 +54,7 @@ player positions *(planned)*.
 | 1–8 | Weapon select (8 = block gun) |
 | E | Use (doors, switches) |
 
-## 4. The block gun (weapon 8) *(planned — M6)*
+## 4. The block gun (weapon 8)
 
 - Always in the player's inventory; survives death; selected like any weapon.
 - **Grid**: 32-map-unit cubes on a global 3D grid aligned to the map origin.
@@ -76,6 +77,19 @@ player positions *(planned)*.
   top, and walk under bridges; removing a supporting block re-runs support
   checks so gravity applies. Blocks block hitscan, projectiles, and monster
   sight (3D DDA). Blocks are per-level and cleared on exit.
+- **Jump/climb nuance**: the jump apex is ~36 map units, so a +32 rise
+  between block tops is always jumpable, but a grid-aligned block whose
+  top sits more than ~36 above a misaligned sector floor is not directly
+  jumpable — place a partially-buried block first and stair-step (this is
+  also how you pillar up). Blocks may interpenetrate world geometry by
+  design.
+- **Implementation map**: grid + DDA in `src/blocks/grid.ts`, gun states
+  and place/remove in `src/blocks/gun.ts` (psprite states appended after
+  the generated table, fist sprite as the stand-in visual), sim wiring in
+  `src/blocks/index.ts`, rendering in `src/render/blocksmesh.ts`
+  (InstancedMesh, procedural brick texture, damage tint). The grid is part
+  of the desync checksum. BFG detonations clear all blocks within a 4-cell
+  radius; BFG spray rays lose 25% damage per block of depth (0 at ≥4).
 
 ## 5. Networking
 

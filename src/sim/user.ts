@@ -161,6 +161,9 @@ export function playerThink(sim: DoomSim, player: Player): void {
   if (cmd.buttons & BT_CHANGE) {
     let newweapon = (cmd.buttons & BT_WEAPONMASK) >> BT_WEAPONSHIFT;
 
+    // DoomCraft: weapon key 8 (mask value 7) selects the block gun.
+    if (newweapon === 7) newweapon = Weapon.BlockGun;
+
     if (
       newweapon === Weapon.Fist &&
       player.weaponowned[Weapon.Chainsaw] &&

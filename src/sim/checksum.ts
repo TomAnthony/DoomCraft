@@ -44,5 +44,13 @@ export function simChecksum(sim: DoomSim): number {
     h = fnv1a(h, s.floorheight);
     h = fnv1a(h, s.ceilingheight);
   }
+
+  h = fnv1a(h, sim.blocks.count);
+  for (const cell of sim.blocks.entries()) {
+    h = fnv1a(h, cell.bx);
+    h = fnv1a(h, cell.by);
+    h = fnv1a(h, cell.bz);
+    h = fnv1a(h, cell.hp);
+  }
   return h;
 }

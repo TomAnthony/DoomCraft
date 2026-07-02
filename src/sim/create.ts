@@ -1,6 +1,7 @@
 // Factory: a DoomSim with all gameplay modules installed. Pure sim —
 // no renderer/audio imports, usable headless (tests, server tools).
 
+import { installBlocks } from '../blocks/index.ts';
 import { installAI } from './ai/index.ts';
 import { installCombat } from './combat.ts';
 import { installInter } from './inter.ts';
@@ -18,6 +19,9 @@ export function createGameSim(): DoomSim {
   installWeapons(sim);
   installSpecials(sim);
   installAI(sim);
+  // blocks must install AFTER AI (it wraps checkSight) and combat
+  // (it wraps radiusAttack/explodeMissile)
+  installBlocks(sim);
 
   // A_BossDeath / A_KeenDie floor+door triggers (dummy tagged line, as C).
   const junkLine = (tag: number): Line => {

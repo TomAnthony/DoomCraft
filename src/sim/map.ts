@@ -65,6 +65,12 @@ export class PMap {
 
   hooks: PMapHooks = noopHooks;
 
+  /**
+   * Block choke point 1: adjusts tmfloorz/tmceilingz for voxel blocks in
+   * the destination AABB (installed by the blocks module).
+   */
+  adjustHeights: ((thing: Mobj, x: Fixed, y: Fixed) => void) | null = null;
+
   // slide move state
   private bestslidefrac: Fixed = 0;
   private bestslideline: Line | null = null;
@@ -273,6 +279,8 @@ export class PMap {
         if (!this.tr.blockLinesIterator(bx, by, (ld) => this.checkLine(ld))) return false;
       }
     }
+
+    if (this.adjustHeights) this.adjustHeights(thing, x, y);
     return true;
   }
 

@@ -13,8 +13,10 @@ export const enum Weapon {
   Chainsaw = 7,
   SuperShotgun = 8,
   NoChange = 9,
+  /** DoomCraft: the block gun (weapon key 8) */
+  BlockGun = 10,
 }
-export const NUMWEAPONS = 9;
+export const NUMWEAPONS = 9; // vanilla weapons; BlockGun is bolted on
 
 export const enum Ammo {
   Clip = 0,
@@ -57,7 +59,8 @@ export interface WeaponInfo {
   readonly flashstate: number;
 }
 
-export const weaponinfo: readonly WeaponInfo[] = [
+// Mutable: the block-gun module appends entries 9 (pad) and 10.
+export const weaponinfo: WeaponInfo[] = [
   { ammo: Ammo.NoAmmo, upstate: S.PUNCHUP, downstate: S.PUNCHDOWN, readystate: S.PUNCH, atkstate: S.PUNCH1, flashstate: S.NULL },
   { ammo: Ammo.Clip, upstate: S.PISTOLUP, downstate: S.PISTOLDOWN, readystate: S.PISTOL, atkstate: S.PISTOL1, flashstate: S.PISTOLFLASH },
   { ammo: Ammo.Shell, upstate: S.SGUNUP, downstate: S.SGUNDOWN, readystate: S.SGUN, atkstate: S.SGUN1, flashstate: S.SGUNFLASH1 },

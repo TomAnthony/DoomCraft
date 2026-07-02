@@ -190,7 +190,8 @@ export class Player {
   frags: number[] = [0, 0];
   /** invuln, strength, invisibility, ironfeet, allmap, infrared (tics) */
   powers: number[] = [0, 0, 0, 0, 0, 0];
-  weaponowned: boolean[] = [true, true, false, false, false, false, false, false, false];
+  /** indices 0-8 vanilla; 9 = NoChange pad; 10 = block gun (always owned) */
+  weaponowned: boolean[] = [true, true, false, false, false, false, false, false, false, false, true];
   ammo: number[] = [50, 0, 0, 0];
   maxammo: number[] = [200, 50, 300, 50];
   backpack = false;
