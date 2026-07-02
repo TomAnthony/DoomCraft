@@ -106,14 +106,14 @@ export class NetClient {
     return n;
   }
 
-  /** Run one lockstep tic. Returns the tic number just simulated. */
+  /** Run one lockstep tic. Returns the tic number just simulated.
+   *  Cmds are retained — the full log is the game's serialization and
+   *  powers replay-based desync recovery. */
   advance(sim: DoomSim): number {
     const tic = this.simTic;
     const c0 = this.cmds[0]!.get(tic) ?? emptyCmd();
     const c1 = this.cmds[1]!.get(tic) ?? emptyCmd();
     sim.runTic([c0, c1]);
-    this.cmds[0]!.delete(tic);
-    this.cmds[1]!.delete(tic);
     this.simTic++;
 
     // checksum exchange every 35 tics
@@ -139,6 +139,18 @@ export class NetClient {
       this.localChecksums.delete(tic);
       this.remoteChecksums.delete(tic);
     }
+  }
+
+  /** Cmd from the retained log (replay-based resync). */
+  getCmd(player: number, tic: number): TicCmd {
+    return this.cmds[player]!.get(tic) ?? emptyCmd();
+  }
+
+  /** Clear desync state after a successful replay resync. */
+  clearDesync(): void {
+    this.desync = null;
+    this.localChecksums.clear();
+    this.remoteChecksums.clear();
   }
 
   close(): void {

@@ -37,11 +37,11 @@ export class MobjSprites {
     this.table = buildSpriteTable(wad);
   }
 
-  private material(lumpName: string, shadow: boolean): THREE.ShaderMaterial {
-    const key = shadow ? `${lumpName}~s` : lumpName;
+  private material(lumpName: string, shadow: boolean, translation: number): THREE.ShaderMaterial {
+    const key = `${lumpName}${shadow ? '~s' : ''}${translation ? `@${translation}` : ''}`;
     let mat = this.materials.get(key);
     if (!mat) {
-      const entry = this.store.spriteTexture(lumpName)!;
+      const entry = this.store.spriteTexture(lumpName, translation)!;
       mat = makeSurfaceMaterial(entry.texture, true);
       mat.side = THREE.DoubleSide;
       if (shadow) {
@@ -140,14 +140,16 @@ export class MobjSprites {
       }
 
       if (lump.lumpName !== t.lump || lump.mirrored !== t.mirrored) {
-        const entry = this.store.spriteTexture(lump.lumpName);
+        // vanilla player color translation (bits 26-27 of flags)
+        const translation = (mobj.flags >> 26) & 3;
+        const entry = this.store.spriteTexture(lump.lumpName, translation);
         if (!entry) {
           t.mesh.visible = false;
           continue;
         }
         t.lump = lump.lumpName;
         t.mirrored = lump.mirrored;
-        t.mesh.material = this.material(lump.lumpName, (mobj.flags & MF.SHADOW) !== 0);
+        t.mesh.material = this.material(lump.lumpName, (mobj.flags & MF.SHADOW) !== 0, translation);
         t.mesh.scale.set(lump.mirrored ? -entry.pic.width : entry.pic.width, entry.pic.height, 1);
       }
 

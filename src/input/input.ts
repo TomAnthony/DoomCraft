@@ -27,6 +27,8 @@ const YAW_SCALE = 12;
 const PITCH_SCALE = 12;
 
 export class InputHandler {
+  /** mouse sensitivity multiplier (options slider; 1 = default) */
+  sensitivity = 1;
   private keys = new Set<string>();
   private mouseDx = 0;
   private mouseDy = 0;
@@ -66,11 +68,11 @@ export class InputHandler {
 
   /** Un-consumed mouse yaw, in angleturn units (for camera prediction). */
   pendingYawTurn(): number {
-    return (-this.mouseDx * YAW_SCALE) | 0;
+    return (-this.mouseDx * YAW_SCALE * this.sensitivity) | 0;
   }
 
   pendingPitchTurn(): number {
-    return (-this.mouseDy * PITCH_SCALE) | 0;
+    return (-this.mouseDy * PITCH_SCALE * this.sensitivity) | 0;
   }
 
   buildTicCmd(): TicCmd {
@@ -91,8 +93,8 @@ export class InputHandler {
     if (this.keys.has('ArrowDown')) kbPitch -= 500;
 
     const clamp16 = (v: number) => Math.max(-32768, Math.min(32767, v | 0));
-    cmd.angleturn = clamp16(-this.mouseDx * YAW_SCALE + kbYaw);
-    cmd.pitch = clamp16(-this.mouseDy * PITCH_SCALE + kbPitch);
+    cmd.angleturn = clamp16(-this.mouseDx * YAW_SCALE * this.sensitivity + kbYaw);
+    cmd.pitch = clamp16(-this.mouseDy * PITCH_SCALE * this.sensitivity + kbPitch);
     this.mouseDx = 0;
     this.mouseDy = 0;
 

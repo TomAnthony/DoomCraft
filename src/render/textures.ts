@@ -65,13 +65,28 @@ export class TextureStore {
     return entry;
   }
 
-  spriteTexture(lumpName: string): (TextureEntry & { pic: Picture }) | null {
-    const cached = this.sprite.get(lumpName);
+  /**
+   * translation 0 = none; 1-3 remap the player-green palette ramp
+   * (0x70-0x7F) to gray / brown / red, per vanilla R_InitTranslationTables
+   * (player 2 = gray/indigo, 3 = brown, 4 = red).
+   */
+  spriteTexture(lumpName: string, translation = 0): (TextureEntry & { pic: Picture }) | null {
+    const key = translation ? `${lumpName}@${translation}` : lumpName;
+    const cached = this.sprite.get(key);
     if (cached) return cached;
     if (!this.wad.has(lumpName)) return null;
-    const pic = decodePicture(this.wad.read(lumpName));
+    let pic = decodePicture(this.wad.read(lumpName));
+    if (translation >= 1 && translation <= 3) {
+      const base = [0x60, 0x40, 0x20][translation - 1]!;
+      const pixels = new Uint8Array(pic.pixels); // copy: source is WAD data
+      for (let i = 0; i < pixels.length; i++) {
+        const p = pixels[i]!;
+        if (p >= 0x70 && p <= 0x7f) pixels[i] = base + (p & 0xf);
+      }
+      pic = { ...pic, pixels };
+    }
     const entry = { ...this.toEntry(pic), pic };
-    this.sprite.set(lumpName, entry);
+    this.sprite.set(key, entry);
     return entry;
   }
 }

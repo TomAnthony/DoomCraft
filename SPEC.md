@@ -113,10 +113,13 @@ player positions *(planned)*.
   opaque binary frames and holds no game state.
 - **Joining**: creator opens `/?server=ws://host:8666&map=N` and shares the
   room code; the other player opens `/?server=ws://host:8666&room=CODE`.
-- **Desync detection**: every 35 tics, FNV-1a checksum over leveltime, RNG
-  index, player state, all mobjs in thinker order, and sector heights
-  (`src/sim/checksum.ts`). Mismatch → error overlay ("DESYNC at tic N");
-  full-snapshot resync is future work.
+- **Desync detection & recovery**: every 35 tics, FNV-1a checksum over
+  leveltime, RNG index, player state, all mobjs in thinker order, sector
+  heights, and the block grid (`src/sim/checksum.ts`). On mismatch both
+  peers independently rebuild the sim by replaying the retained cmd log
+  from game start (determinism makes the log a complete serialization;
+  replay runs ~90k tics/sec). A second desync within 30s indicates a
+  systematic bug and shows the fatal overlay instead.
 - **Stalls**: the sim freezes awaiting the peer's cmd; "waiting for peer"
   overlay after ~350ms; a disconnected peer shows PEER DISCONNECTED.
 - **Level transitions** run in lockstep: both sims detect the exit on the

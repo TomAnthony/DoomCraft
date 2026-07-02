@@ -3,7 +3,9 @@
 // tint through instance colors.
 
 import * as THREE from 'three';
-import { BLOCK_HP, BLOCK_UNITS, MAX_BLOCKS, type BlockGrid } from '../blocks/grid.ts';
+import { BLOCK_FX, BLOCK_HP, BLOCK_UNITS, MAX_BLOCKS } from '../blocks/grid.ts';
+import { pointInSubsector } from '../sim/maputl.ts';
+import type { DoomSim } from '../sim/sim.ts';
 
 /** Procedural 64x64 stone-brick texture (no WAD dependency). */
 function makeBlockTexture(): THREE.DataTexture {
@@ -36,6 +38,7 @@ function makeBlockTexture(): THREE.DataTexture {
 export class BlocksMesh {
   readonly mesh: THREE.InstancedMesh;
   private lastVersion = -1;
+  private lastLightStamp = -1;
   private readonly dummy = new THREE.Object3D();
 
   constructor() {
@@ -55,10 +58,14 @@ export class BlocksMesh {
     this.mesh.frustumCulled = false;
   }
 
-  sync(grid: BlockGrid): void {
-    if (grid.version === this.lastVersion) return;
+  sync(sim: DoomSim): void {
+    const grid = sim.blocks;
+    // re-tint on grid changes or once per sim tic (sector lights flicker)
+    if (grid.version === this.lastVersion && sim.leveltime === this.lastLightStamp) return;
     this.lastVersion = grid.version;
+    this.lastLightStamp = sim.leveltime;
 
+    const color = new THREE.Color();
     let i = 0;
     for (const cell of grid.entries()) {
       // map coords: cell center; three: x, height, -y
@@ -70,9 +77,19 @@ export class BlocksMesh {
       this.dummy.rotation.set(0, 0, 0);
       this.dummy.updateMatrix();
       this.mesh.setMatrixAt(i, this.dummy.matrix);
-      // crack tint: full hp = light gray, damaged = darker and redder
+
+      // sector light at the cell (matches the surrounding world shading)
+      const sector = pointInSubsector(
+        sim.world,
+        cell.bx * BLOCK_FX + BLOCK_FX / 2,
+        cell.by * BLOCK_FX + BLOCK_FX / 2,
+      ).sector;
+      const light = Math.min(1, sector.lightlevel / 255 + 0.08);
+
+      // crack tint: full hp = neutral, damaged = darker and redder
       const f = Math.max(0.25, cell.hp / BLOCK_HP);
-      this.mesh.setColorAt(i, new THREE.Color(1 * (0.5 + 0.5 * f), f, f));
+      color.setRGB((0.5 + 0.5 * f) * light, f * light, f * light);
+      this.mesh.setColorAt(i, color);
       i++;
     }
     this.mesh.count = i;

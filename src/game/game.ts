@@ -144,7 +144,7 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
   renderer.domElement.addEventListener('click', () => audio.resume());
 
   const music = new MusicPlayer(wad, audio);
-  const options = new OptionsMenu(root, audio, () => {
+  const options = new OptionsMenu(root, audio, input, () => {
     options.hide();
     requestLock(renderer.domElement);
     audio.resume();
@@ -265,12 +265,21 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
     };
   }
 
-  function loadLevel(n: number): void {
+  function loadLevelSim(n: number): void {
     mapNumber = n;
     const name = `MAP${String(n).padStart(2, '0')}`;
     if (!maps.includes(name)) throw new Error(`no such map ${name}`);
     mapData = readMap(wad, name);
     sim.loadLevel(mapData, n, { spawnThings: true });
+  }
+
+  function loadLevel(n: number): void {
+    loadLevelSim(n);
+    buildLevelRender(n);
+  }
+
+  function buildLevelRender(n: number): void {
+    const name = `MAP${String(n).padStart(2, '0')}`;
 
     level?.dispose();
     scene = new THREE.Scene();
@@ -303,6 +312,36 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
   }
 
   loadLevel(mapNumber);
+  const initialMap = mapNumber;
+
+  // --- desync recovery: rebuild the sim by replaying the full cmd log.
+  // Determinism means the log is a complete serialization; both peers
+  // reconstruct the same state independently.
+  let lastResyncAt = -Infinity;
+  function resyncFromLog(): boolean {
+    if (!netClient) return false;
+    const total = netClient.simTic;
+    const t0 = performance.now();
+
+    sim.resetForReplay();
+    let map = initialMap;
+    loadLevelSim(map);
+    for (let t = 0; t < total; t++) {
+      if (sim.exitPending) {
+        const secret = sim.exitPending === 'secret';
+        finishLevel(sim);
+        map = nextMap(map, secret);
+        loadLevelSim(map);
+      }
+      sim.runTic([netClient.getCmd(0, t), netClient.getCmd(1, t)]);
+    }
+    buildLevelRender(map);
+    netClient.clearDesync();
+    console.warn(
+      `resynced: replayed ${total} tics in ${(performance.now() - t0).toFixed(0)}ms`,
+    );
+    return true;
+  }
 
   // debug handle for scripted verification (harmless in production)
   (window as unknown as { __dc: unknown }).__dc = {
@@ -372,11 +411,19 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
     acc += now - last;
     last = now;
 
-    if (netClient && (netClient.desync !== null || netClient.peerLeft)) {
-      overlay.textContent = netClient.peerLeft
-        ? 'PEER DISCONNECTED'
-        : `DESYNC at tic ${netClient.desync} — please restart`;
+    if (netClient && netClient.peerLeft) {
+      overlay.textContent = 'PEER DISCONNECTED';
       overlay.style.display = 'flex';
+    } else if (netClient && netClient.desync !== null) {
+      // Try replay-based recovery; two desyncs within 30s means a
+      // systematic determinism bug — give up rather than thrash.
+      if (now - lastResyncAt < 30000) {
+        overlay.textContent = `DESYNC at tic ${netClient.desync} — please restart`;
+        overlay.style.display = 'flex';
+      } else {
+        lastResyncAt = now;
+        resyncFromLog();
+      }
     }
 
     let ran = 0;
@@ -445,7 +492,7 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
 
     if (sky) sky.position.copy(camera.position);
     sprites!.update(sim, camera, alpha, mo);
-    blocksMesh!.sync(sim.blocks);
+    blocksMesh!.sync(sim);
     updateBlockAids();
 
     renderer.clear();

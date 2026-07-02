@@ -157,7 +157,7 @@ export class MusicPlayer {
       clearInterval(this.timer);
       this.timer = null;
     }
-    for (const v of this.voices.values()) this.killVoice(v, 0.01);
+    if (this.audio.ctx) this.killAllVoices(0.01);
     this.voices.clear();
     this.song = null;
   }
@@ -192,13 +192,18 @@ export class MusicPlayer {
     return `${channel}:${note}`;
   }
 
-  private killVoice(v: Voice, release: number): void {
+  /** Release a voice at its scheduled musical time (not "now"). */
+  private killVoice(v: Voice, release: number, when?: number): void {
     const ctx = this.audio.ctx!;
-    const t = ctx.currentTime;
+    const t = Math.max(when ?? ctx.currentTime, ctx.currentTime);
     v.gain.gain.cancelScheduledValues(t);
-    v.gain.gain.setValueAtTime(v.gain.gain.value, t);
-    v.gain.gain.linearRampToValueAtTime(0, t + release);
-    for (const o of v.osc) o.stop(t + release + 0.02);
+    v.gain.gain.setTargetAtTime(0, t, Math.max(0.005, release / 4));
+    for (const o of v.osc) o.stop(t + release + 0.05);
+  }
+
+  private killAllVoices(release: number, when?: number): void {
+    for (const v of this.voices.values()) this.killVoice(v, release, when);
+    this.voices.clear();
   }
 
   private pump(): void {
@@ -214,9 +219,15 @@ export class MusicPlayer {
       this.dispatch(ev, Math.max(when, ctx.currentTime));
     }
 
-    // loop
+    // loop: silence everything still sounding (otherwise notes active at
+    // the song tail drone forever under the next pass) and reset the
+    // transient channel state the replayed events won't necessarily reset
     if (this.nextEvent >= this.song.events.length) {
-      this.startTime = this.startTime + this.song.duration + 0.5;
+      const loopAt = this.startTime + this.song.duration;
+      this.killAllVoices(0.15, loopAt);
+      this.bends.fill(128);
+      this.lastVol.fill(100);
+      this.startTime = loopAt + 0.5;
       this.nextEvent = 0;
     }
   }
@@ -227,7 +238,7 @@ export class MusicPlayer {
         const k = this.key(ev.channel, ev.a);
         const v = this.voices.get(k);
         if (v) {
-          this.killVoice(v, v.release);
+          this.killVoice(v, v.release, when);
           this.voices.delete(k);
         }
         break;
@@ -243,7 +254,7 @@ export class MusicPlayer {
         if (ev.a === 10 || ev.a === 11) {
           for (const [k, v] of this.voices) {
             if (k.startsWith(`${ev.channel}:`)) {
-              this.killVoice(v, 0.05);
+              this.killVoice(v, 0.05, when);
               this.voices.delete(k);
             }
           }
@@ -272,8 +283,19 @@ export class MusicPlayer {
     const k = this.key(channel, note);
     const existing = this.voices.get(k);
     if (existing) {
-      this.killVoice(existing, 0.01);
+      this.killVoice(existing, 0.01, when);
       this.voices.delete(k);
+    }
+
+    // safety valve: if note-offs somehow go missing, shed the oldest
+    // voices instead of accumulating oscillators forever
+    if (this.voices.size > 96) {
+      let shed = 8;
+      for (const [key2, v] of this.voices) {
+        this.killVoice(v, 0.05);
+        this.voices.delete(key2);
+        if (--shed <= 0) break;
+      }
     }
 
     const preset = presetFor(this.patches[channel]!);

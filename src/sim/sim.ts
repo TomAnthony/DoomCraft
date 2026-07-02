@@ -105,6 +105,8 @@ export class DoomSim {
     this.thinkers.count = 0;
     this.blocks.clear();
     this.itemRespawnQueue = [];
+    this.totalkills = 0;
+    this.totalitems = 0;
     this.playerstarts = [null, null, null, null];
 
     // P_LoadThings: player/deathmatch starts recorded; other things
@@ -139,6 +141,19 @@ export class DoomSim {
 
     this.exitPending = null;
     this.spawnSpecials();
+  }
+
+  /**
+   * Reset to the page-load state so the full cmd log can be replayed
+   * from game start (desync recovery / rejoin). Determinism makes the
+   * log a complete serialization of the game.
+   */
+  resetForReplay(): void {
+    for (let i = 0; i < MAXPLAYERS; i++) {
+      this.players[i] = new Player(i);
+    }
+    this.rng.clear();
+    this.exitPending = null;
   }
 
   /** Iterate live mobjs in thinker order (for rendering/checksums). */
