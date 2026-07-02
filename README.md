@@ -22,7 +22,7 @@ See [SPEC.md](SPEC.md) for the full specification.
 npm install
 npm run gen     # one-off: generate sim data tables from reference C source
 npm run dev     # client dev server on http://localhost:5173
-npm run server  # game relay server
+npm run server  # game relay server (ws + static, port 8666)
 npm test
 ```
 
@@ -34,3 +34,14 @@ https://github.com/chocolate-doom/chocolate-doom.git reference/chocolate-doom`).
 
 GPL-2.0-only. Contains code ported from Chocolate Doom / the original Doom
 source release. Game data (`DOOM2.WAD`) is not included.
+
+## Playing multiplayer
+
+1. Run the relay somewhere both players can reach: `npm run server`
+   (port 8666; for internet play, put it on a VPS or forward the port).
+2. Player 1 opens `http://<client-host>/?server=ws://<relay-host>:8666&map=1`
+   and reads the 4-letter room code off the screen.
+3. Player 2 opens `http://<client-host>/?server=ws://<relay-host>:8666&room=CODE`.
+4. The game starts the moment player 2 joins. Co-op rules with friendly
+   fire: monsters spawn once, cleared levels stay clear, dead players
+   press USE (E) to respawn.

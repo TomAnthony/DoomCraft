@@ -77,23 +77,32 @@ player positions *(planned)*.
   checks so gravity applies. Blocks block hitscan, projectiles, and monster
   sight (3D DDA). Blocks are per-level and cleared on exit.
 
-## 5. Networking *(planned — M5)*
+## 5. Networking
 
-- **Model**: delay-based deterministic lockstep at 35Hz, 3-tic input delay
-  (adaptive 1–5 from RTT). Both clients run identical sims; only inputs are
-  exchanged.
-- **ticcmd (10 bytes)**: `forwardmove i8, sidemove i8, angleturn i16,
-  pitch i16, buttons u8, buttons2 u8 (jump/place/remove), weapon u8, pad u8`.
-  Wire frame: `[u32 tic][ticcmd]` binary over WebSocket.
-- **Server**: single Node process — WebSocket relay with 4-character room
-  codes plus static file hosting. JSON lobby messages (create/join/start);
-  WAD hash compared at join, mismatch refused; in-game it relays opaque
-  binary frames and holds no game state.
-- **Desync detection**: every 35 tics, FNV-1a checksum over RNG index, player
-  state, all mobjs in thinker order, sector heights, and the block-grid hash.
-  Mismatch → full snapshot resync from player 1; two failures → back to lobby.
-- **Stalls**: sim freezes awaiting the peer's cmd; overlay after ~350ms;
-  disconnect after 10s.
+- **Model**: delay-based deterministic lockstep at 35Hz with a 3-tic input
+  delay (`INPUT_DELAY` in `src/net/client.ts`; adaptive delay is future
+  work). Both clients run identical sims; only inputs are exchanged.
+- **Wire format**: binary over WebSocket, `[u8 type][u32 tic][payload]`.
+  Type 1 = ticcmd (10 bytes: `forwardmove i8, sidemove i8, angleturn i16,
+  pitch i16, buttons u8, buttons2 u8 (jump/place/remove), pad u16`); type 2 =
+  checksum (u32). Weapon selection travels in `buttons` (vanilla
+  BT_CHANGE + 3-bit mask).
+- **Server** (`server/main.ts`): single Node process — WebSocket relay with
+  4-character room codes plus static hosting of `dist/`. JSON lobby
+  (create/join); the game starts automatically when the second player
+  joins; WAD hash compared at join, mismatch refused; in-game it relays
+  opaque binary frames and holds no game state.
+- **Joining**: creator opens `/?server=ws://host:8666&map=N` and shares the
+  room code; the other player opens `/?server=ws://host:8666&room=CODE`.
+- **Desync detection**: every 35 tics, FNV-1a checksum over leveltime, RNG
+  index, player state, all mobjs in thinker order, and sector heights
+  (`src/sim/checksum.ts`). Mismatch → error overlay ("DESYNC at tic N");
+  full-snapshot resync is future work.
+- **Stalls**: the sim freezes awaiting the peer's cmd; "waiting for peer"
+  overlay after ~350ms; a disconnected peer shows PEER DISCONNECTED.
+- **Level transitions** run in lockstep: both sims detect the exit on the
+  same tic, show a 105-tic intermission, and load the next map
+  deterministically.
 
 ## 6. Determinism rules (enforced)
 

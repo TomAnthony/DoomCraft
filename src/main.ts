@@ -14,6 +14,13 @@ const params = new URLSearchParams(location.search);
 const mapParam = (params.get('map') ?? 'MAP01').toUpperCase();
 const mapName = /^\d+$/.test(mapParam) ? `MAP${mapParam.padStart(2, '0')}` : mapParam;
 
+// Netplay: ?server=ws://host:8666 creates a room (add &map=7 to pick the
+// map); ?server=...&room=CODE joins one.
+const server = params.get('server');
+const net = server
+  ? { url: server, room: params.get('room') ?? undefined }
+  : undefined;
+
 const run =
   params.get('view') === 'wad'
     ? runWadViewer(app)
@@ -21,7 +28,7 @@ const run =
       ? runMapViewer(app, mapName)
       : params.get('view') === 'walk'
         ? runPlayViewer(app, mapName)
-        : runGame(app, parseInt(mapName.slice(3), 10));
+        : runGame(app, parseInt(mapName.slice(3), 10), net);
 
 run.catch((err) => {
   app.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;

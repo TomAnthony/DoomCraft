@@ -15,11 +15,13 @@ import { FRACUNIT } from '../sim/fixed.ts';
 
 
 import { createGameSim } from '../sim/create.ts';
+import { INPUT_DELAY, NetClient } from '../net/client.ts';
 import type { DoomSim } from '../sim/sim.ts';
 import { textureHeights } from '../sim/specials/floors.ts';
 import { PlayerState } from '../sim/defs.ts';
+import { emptyCmd } from '../sim/ticcmd.ts';
 import { listMaps, readMap, type MapData } from '../wad/maps.ts';
-import { WadFile } from '../wad/wad.ts';
+import { hashWad, WadFile } from '../wad/wad.ts';
 
 const TIC_MS = 1000 / 35;
 
@@ -61,17 +63,61 @@ function finishLevel(sim: DoomSim): void {
   }
 }
 
-export async function runGame(root: HTMLElement, startMap: number): Promise<void> {
+export interface NetOptions {
+  url: string;
+  /** join this room; omit to create one */
+  room?: string;
+}
+
+export async function runGame(root: HTMLElement, startMap: number, net?: NetOptions): Promise<void> {
   const resp = await fetch('/DOOM2.WAD');
   if (!resp.ok) {
     root.textContent = 'DOOM2.WAD not found — place it in the project root.';
     return;
   }
-  const wad = new WadFile(await resp.arrayBuffer());
+  const wadBuffer = await resp.arrayBuffer();
+  const wad = new WadFile(wadBuffer);
   const maps = listMaps(wad);
   const store = new TextureStore(wad);
   populateTextureHeights(store);
   const audio = new AudioPlayer(wad);
+
+  // --- lobby (netgame) -----------------------------------------------------
+  let netClient: NetClient | null = null;
+  let localSlot = 0;
+  if (net) {
+    const status = document.createElement('div');
+    status.style.cssText =
+      'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;' +
+      'color:#8f8;font:bold 24px monospace;text-align:center;white-space:pre';
+    status.textContent = `Connecting to ${net.url}…`;
+    root.appendChild(status);
+
+    netClient = new NetClient();
+    const hash = await hashWad(wadBuffer);
+    try {
+      // surface the room code while waiting for player 2
+      const poll = setInterval(() => {
+        if (netClient!.room) {
+          status.textContent =
+            `Room code: ${netClient!.room}\n\nwaiting for player 2…\n\n` +
+            `they should open ${location.origin}/?server=${encodeURIComponent(net.url)}&room=${netClient!.room}`;
+        }
+      }, 300);
+      const lobby = await netClient.connect(net.url, {
+        room: net.room,
+        map: startMap,
+        wadHash: hash,
+      });
+      clearInterval(poll);
+      localSlot = lobby.slot;
+      startMap = lobby.map;
+    } catch (err) {
+      status.textContent = `Netgame error: ${err instanceof Error ? err.message : String(err)}`;
+      return;
+    }
+    status.remove();
+  }
 
   const renderer = new THREE.WebGLRenderer({ antialias: false });
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -98,6 +144,13 @@ export async function runGame(root: HTMLElement, startMap: number): Promise<void
 
   const sim = createGameSim();
   sim.playeringame[0] = true;
+  if (netClient) sim.playeringame[1] = true;
+  const localPlayer = () => sim.players[localSlot]!;
+
+  // prefill the input-delay buffer so both sims can start immediately
+  if (netClient) {
+    for (let i = 0; i < INPUT_DELAY; i++) netClient.pushLocalCmd(emptyCmd());
+  }
 
   // level state
   let mapNumber = startMap;
@@ -134,7 +187,7 @@ export async function runGame(root: HTMLElement, startMap: number): Promise<void
 
   function snapshotView(): void {
     prevView = curView;
-    const p = sim.players[0]!;
+    const p = localPlayer();
     curView = {
       x: p.mo!.x / FRACUNIT,
       y: p.mo!.y / FRACUNIT,
@@ -169,59 +222,91 @@ export async function runGame(root: HTMLElement, startMap: number): Promise<void
     };
     snapshotSectors();
     snapshotSectors();
-    sprites.snapshot(sim, sim.players[0]!.mo);
+    sprites.snapshot(sim, localPlayer().mo);
     snapshotView();
     snapshotView();
   }
 
   loadLevel(mapNumber);
 
-  let exitCountdown = 0;
+  // Runs after every simulated tic (solo and net take the same path).
+  let intermission = 0;
+  function postTic(): void {
+    sprites!.snapshot(sim, localPlayer().mo);
+    snapshotSectors();
+    snapshotView();
+    audio.playEvents(sim.soundEvents, {
+      x: curView.x,
+      y: curView.y,
+      angle: bamToRad(localPlayer().mo!.angle),
+    });
+    if (intermission > 0) {
+      intermission--;
+      if (intermission === 0) {
+        overlay.style.display = 'none';
+        const secret = sim.exitPending === 'secret';
+        finishLevel(sim);
+        loadLevel(nextMap(mapNumber, secret));
+      }
+    } else if (sim.exitPending) {
+      const p = localPlayer();
+      overlay.textContent =
+        `${`MAP${String(mapNumber).padStart(2, '0')}`} COMPLETE\n\n` +
+        `KILLS ${p.killcount}/${sim.totalkills}   ITEMS ${p.itemcount}/${sim.totalitems}   SECRETS ${p.secretcount}`;
+      overlay.style.display = 'flex';
+      intermission = 105; // 3 seconds; sim keeps ticking (lockstep-safe)
+    }
+  }
+
+  const waiting = document.createElement('div');
+  waiting.style.cssText =
+    'position:fixed;top:40%;left:50%;transform:translateX(-50%);color:#fc6;display:none;' +
+    'font:bold 20px monospace;text-shadow:2px 2px 0 #000;pointer-events:none';
+  waiting.textContent = 'waiting for peer…';
+  root.appendChild(waiting);
+
   let acc = 0;
   let last = performance.now();
+  let lastAdvance = performance.now();
 
   renderer.setAnimationLoop(() => {
     const now = performance.now();
     acc += now - last;
     last = now;
 
+    if (netClient && (netClient.desync !== null || netClient.peerLeft)) {
+      overlay.textContent = netClient.peerLeft
+        ? 'PEER DISCONNECTED'
+        : `DESYNC at tic ${netClient.desync} — please restart`;
+      overlay.style.display = 'flex';
+    }
+
     let ran = 0;
     while (acc >= TIC_MS && ran < 4) {
-      if (exitCountdown > 0) {
-        // intermission pause
-        exitCountdown--;
-        if (exitCountdown === 0) {
-          overlay.style.display = 'none';
-          finishLevel(sim);
-          loadLevel(nextMap(mapNumber, sim.exitPending === 'secret'));
+      if (netClient) {
+        // lockstep: emit our cmd for (simTic + delay), then advance while
+        // both sides' cmds are buffered
+        netClient.pushLocalCmd(input.buildTicCmd());
+        while (netClient.canAdvance() && netClient.simTic < netClient.sendTic) {
+          netClient.advance(sim);
+          postTic();
+          lastAdvance = now;
         }
       } else {
-        const cmd = input.buildTicCmd();
-        sim.runTic([cmd]);
-        sprites!.snapshot(sim, sim.players[0]!.mo);
-        snapshotSectors();
-        snapshotView();
-        audio.playEvents(sim.soundEvents, {
-          x: curView.x,
-          y: curView.y,
-          angle: bamToRad(sim.players[0]!.mo!.angle),
-        });
-        if (sim.exitPending) {
-          const p = sim.players[0]!;
-          overlay.textContent =
-            `${`MAP${String(mapNumber).padStart(2, '0')}`} COMPLETE\n\n` +
-            `KILLS ${p.killcount}/${sim.totalkills}   ITEMS ${p.itemcount}/${sim.totalitems}   SECRETS ${p.secretcount}`;
-          overlay.style.display = 'flex';
-          exitCountdown = 105; // 3 seconds
-        }
+        sim.runTic([input.buildTicCmd()]);
+        postTic();
+        lastAdvance = now;
       }
       acc -= TIC_MS;
       ran++;
     }
     if (ran === 4) acc = 0;
 
+    waiting.style.display =
+      netClient && now - lastAdvance > 350 && !netClient.peerLeft ? 'block' : 'none';
+
     const alpha = Math.min(1, acc / TIC_MS);
-    const p = sim.players[0]!;
+    const p = localPlayer();
     const mo = p.mo!;
 
     // camera
