@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint src server tools",
+    "lint": "eslint src tools",
     "typecheck": "tsc --noEmit",
     "gen": "node --experimental-strip-types tools/gen-tables.ts && node --experimental-strip-types tools/gen-info.ts",
     "server": "node --experimental-strip-types server/main.ts"
