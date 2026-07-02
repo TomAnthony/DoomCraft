@@ -44,7 +44,12 @@ const http = createServer(async (req, res) => {
   try {
     let path = normalize(req.url?.split('?')[0] ?? '/');
     if (path === '/' || path.includes('..')) path = '/index.html';
-    const file = await readFile(join(DIST, path));
+    // The WAD lives in the project root (never in dist/); serving it here
+    // means players don't each need a local copy — one host, one URL.
+    const file =
+      path === '/DOOM2.WAD'
+        ? await readFile(join(DIST, '..', 'DOOM2.WAD'))
+        : await readFile(join(DIST, path));
     res.writeHead(200, { 'Content-Type': MIME[extname(path)] ?? 'application/octet-stream' });
     res.end(file);
   } catch {

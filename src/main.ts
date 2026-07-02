@@ -15,8 +15,12 @@ const mapParam = (params.get('map') ?? 'MAP01').toUpperCase();
 const mapName = /^\d+$/.test(mapParam) ? `MAP${mapParam.padStart(2, '0')}` : mapParam;
 
 // Netplay: ?server=ws://host:8666 creates a room (add &map=7 to pick the
-// map); ?server=...&room=CODE joins one.
-const server = params.get('server');
+// map); ?server=...&room=CODE joins one. When the page is served by the
+// relay itself, ?host (create) or ?room=CODE (join) suffice — the ws URL
+// defaults to this origin.
+const sameOrigin = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
+const server =
+  params.get('server') ?? (params.has('host') || params.has('room') ? sameOrigin : null);
 const net = server
   ? { url: server, room: params.get('room') ?? undefined }
   : undefined;

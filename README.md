@@ -35,13 +35,29 @@ https://github.com/chocolate-doom/chocolate-doom.git reference/chocolate-doom`).
 GPL-2.0-only. Contains code ported from Chocolate Doom / the original Doom
 source release. Game data (`DOOM2.WAD`) is not included.
 
-## Playing multiplayer
+## Playing multiplayer (hosting for a friend)
 
-1. Run the relay somewhere both players can reach: `npm run server`
-   (port 8666; for internet play, put it on a VPS or forward the port).
-2. Player 1 opens `http://<client-host>/?server=ws://<relay-host>:8666&map=1`
-   and reads the 4-letter room code off the screen.
-3. Player 2 opens `http://<client-host>/?server=ws://<relay-host>:8666&room=CODE`.
-4. The game starts the moment player 2 joins. Co-op rules with friendly
-   fire: monsters spawn once, cleared levels stay clear, dead players
-   press USE (E) to respawn.
+One machine hosts everything on a single port:
+
+```sh
+npm run build       # once, or after pulling changes
+npm run server      # serves the game, the WAD, and the relay on :8666
+```
+
+1. Player 1 opens `http://<host>:8666/?host` (add `&map=7` to pick the
+   map) and reads the 4-letter room code off the screen.
+2. Player 2 opens `http://<host>:8666/?room=CODE`.
+3. The game starts the moment player 2 joins.
+
+The host machine needs `DOOM2.WAD` in the project root; the server
+serves it to both browsers (so a friend needs nothing installed). For
+internet play, run it on a VPS or port-forward 8666. Behind TLS/a
+reverse proxy, the ws URL is derived automatically (wss on https).
+
+Dev-mode alternative: run `npm run dev` (client on :5173) plus
+`npm run server` (relay on :8666) and use
+`/?server=ws://<host>:8666` / `&room=CODE` URLs on port 5173.
+
+Mode: deathmatch with monsters — DM spawn points, all keys carried,
+weapons respawn 30s after pickup, monsters spawn once and cleared
+levels stay clear; dead players press E to respawn.
