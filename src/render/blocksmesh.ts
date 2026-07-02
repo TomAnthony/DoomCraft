@@ -40,7 +40,13 @@ export class BlocksMesh {
 
   constructor() {
     const geometry = new THREE.BoxGeometry(BLOCK_UNITS, BLOCK_UNITS, BLOCK_UNITS);
-    const material = new THREE.MeshBasicMaterial({ map: makeBlockTexture() });
+    const material = new THREE.MeshBasicMaterial({
+      map: makeBlockTexture(),
+      // blocks often sit flush with floors/walls; win the depth fight
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -2,
+    });
     this.mesh = new THREE.InstancedMesh(geometry, material, MAX_BLOCKS);
     this.mesh.instanceColor = new THREE.InstancedBufferAttribute(
       new Float32Array(MAX_BLOCKS * 3), 3,

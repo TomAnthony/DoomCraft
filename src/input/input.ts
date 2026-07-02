@@ -8,6 +8,16 @@ import {
 } from '../sim/defs.ts';
 import type { TicCmd } from '../sim/ticcmd.ts';
 
+/** Pointer lock can throw or reject (headless, iframe, races) — never fatal. */
+export function requestLock(element: HTMLElement): void {
+  try {
+    const p = element.requestPointerLock() as unknown as Promise<void> | undefined;
+    p?.catch?.(() => {});
+  } catch {
+    // unavailable in this environment; keyboard-only still works
+  }
+}
+
 // Vanilla run speeds.
 const FORWARDMOVE = 0x32;
 const SIDEMOVE = 0x28;
@@ -27,7 +37,7 @@ export class InputHandler {
   attach(element: HTMLElement): void {
     element.addEventListener('mousedown', (e) => {
       if (document.pointerLockElement !== element) {
-        element.requestPointerLock();
+        requestLock(element);
         return;
       }
       if (e.button === 0) this.attackHeld = true;

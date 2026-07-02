@@ -46,6 +46,7 @@ player positions *(planned)*.
 | --- | --- |
 | Mouse X / Y (pointer lock) | Turn / look up-down |
 | Arrow keys | Keyboard turn / look |
+| Esc | Options menu (music/sound volume; Esc releases the mouse, clicking or Resume re-captures) |
 | W / S | Forward / back |
 | A / D | Strafe left / right |
 | Left click | Fire (block gun: place block) |
@@ -85,7 +86,7 @@ player positions *(planned)*.
   design.
 - **Implementation map**: grid + DDA in `src/blocks/grid.ts`, gun states
   and place/remove in `src/blocks/gun.ts` (psprite states appended after
-  the generated table, fist sprite as the stand-in visual), sim wiring in
+  the generated table; drawn as a procedural isometric cube in hand), sim wiring in
   `src/blocks/index.ts`, rendering in `src/render/blocksmesh.ts`
   (InstancedMesh, procedural brick texture, damage tint). The grid is part
   of the desync checksum. BFG detonations clear all blocks within a 4-cell
@@ -150,6 +151,7 @@ is an untracked read-only clone used by codegen and for porting reference.
 
 ## 8. Deferred / out of scope
 
-- Music playback (MUS → synth) — deferred; sound effects are in scope.
+- OPL-authentic music: music plays via a WebAudio approximation of the
+  MUS tracks (`src/audio/music.ts`) — recognizable, not OPL-accurate.
 - Demo *recording*, savegames, automap, menus, DeHackEd, screen wipe.
 - More than 2 players.

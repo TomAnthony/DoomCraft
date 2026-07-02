@@ -17,15 +17,48 @@ export interface Listener {
 }
 
 export class AudioPlayer {
-  private ctx: AudioContext | null = null;
+  ctx: AudioContext | null = null;
   private buffers = new Map<string, AudioBuffer | null>();
+  private sfxGain: GainNode | null = null;
+  musicGain: GainNode | null = null;
+  private sfxVolume = 0.6;
+  private musicVolume = 0.5;
+  /** called once the context exists (music player hooks in here) */
+  onReady: (() => void) | null = null;
 
   constructor(private readonly wad: WadFile) {}
 
   /** Must be called from a user gesture to unlock audio. */
   resume(): void {
-    if (!this.ctx) this.ctx = new AudioContext();
+    if (!this.ctx) {
+      this.ctx = new AudioContext();
+      this.sfxGain = this.ctx.createGain();
+      this.sfxGain.gain.value = this.sfxVolume;
+      this.sfxGain.connect(this.ctx.destination);
+      this.musicGain = this.ctx.createGain();
+      this.musicGain.gain.value = this.musicVolume;
+      this.musicGain.connect(this.ctx.destination);
+      this.onReady?.();
+    }
     if (this.ctx.state === 'suspended') void this.ctx.resume();
+  }
+
+  setSfxVolume(v: number): void {
+    this.sfxVolume = v;
+    if (this.sfxGain) this.sfxGain.gain.value = v;
+  }
+
+  setMusicVolume(v: number): void {
+    this.musicVolume = v;
+    if (this.musicGain) this.musicGain.gain.value = v;
+  }
+
+  getSfxVolume(): number {
+    return this.sfxVolume;
+  }
+
+  getMusicVolume(): number {
+    return this.musicVolume;
   }
 
   private buffer(name: string): AudioBuffer | null {
@@ -82,10 +115,10 @@ export class AudioPlayer {
       const src = this.ctx.createBufferSource();
       src.buffer = buffer;
       const gain = this.ctx.createGain();
-      gain.gain.value = volume * 0.6;
+      gain.gain.value = volume;
       const panner = this.ctx.createStereoPanner();
       panner.pan.value = Math.max(-1, Math.min(1, pan));
-      src.connect(gain).connect(panner).connect(this.ctx.destination);
+      src.connect(gain).connect(panner).connect(this.sfxGain!);
       src.start();
     }
   }

@@ -3,7 +3,10 @@
 
 import * as THREE from 'three';
 import { AudioPlayer } from '../audio/audio.ts';
-import { InputHandler } from '../input/input.ts';
+import { MusicPlayer, musicLumpForMap } from '../audio/music.ts';
+import { InputHandler, requestLock } from '../input/input.ts';
+import { OptionsMenu } from '../ui/options.ts';
+import { MUS, musicNames } from '../sim/data/sounds.gen.ts';
 import { BlocksMesh } from '../render/blocksmesh.ts';
 import { HudView } from '../render/hud.ts';
 import { LevelMesh } from '../render/levelmesh.ts';
@@ -136,6 +139,24 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
   input.attach(renderer.domElement);
   renderer.domElement.addEventListener('click', () => audio.resume());
 
+  const music = new MusicPlayer(wad, audio);
+  const options = new OptionsMenu(root, audio, () => {
+    options.hide();
+    requestLock(renderer.domElement);
+    audio.resume();
+  });
+  // Esc exits pointer lock; that's the options key. Only after the game
+  // was actually captured once (not on the initial click-to-play screen).
+  let wasLocked = false;
+  document.addEventListener('pointerlockchange', () => {
+    if (document.pointerLockElement === renderer.domElement) {
+      wasLocked = true;
+      options.hide();
+    } else if (wasLocked) {
+      options.show();
+    }
+  });
+
   const hud = new HudView(store, wad, root);
   const overlay = document.createElement('div');
   overlay.style.cssText =
@@ -229,6 +250,8 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
     sprites.snapshot(sim, localPlayer().mo);
     snapshotView();
     snapshotView();
+
+    music.play(musicLumpForMap(n, musicNames, MUS.runnin));
   }
 
   loadLevel(mapNumber);

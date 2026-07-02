@@ -2,6 +2,7 @@
 // sim-driven player camera from M3 onward.
 
 import * as THREE from 'three';
+import { requestLock } from '../input/input.ts';
 
 export class FlyCamera {
   yaw = 0;
@@ -13,7 +14,7 @@ export class FlyCamera {
     readonly camera: THREE.PerspectiveCamera,
     element: HTMLElement,
   ) {
-    element.addEventListener('click', () => element.requestPointerLock());
+    element.addEventListener('click', () => requestLock(element));
     document.addEventListener('mousemove', (e) => {
       if (document.pointerLockElement !== element) return;
       this.yaw -= e.movementX * 0.002;
