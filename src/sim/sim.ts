@@ -7,6 +7,7 @@
 
 import type { MapData } from '../wad/maps.ts';
 import { MF, MT, mobjinfo, states, type StateRow } from './data/info.gen.ts';
+import { sfxinfo } from './data/sounds.gen.ts';
 import {
   MAXPLAYERS, ONCEILINGZ, ONFLOORZ, PlayerState, VIEWHEIGHT,
 } from './defs.ts';
@@ -20,7 +21,7 @@ import { ANG45 } from './tables.ts';
 import { ThinkerList } from './thinker.ts';
 import { emptyCmd, copyCmd, type TicCmd } from './ticcmd.ts';
 import { playerThink } from './user.ts';
-import { Mobj, Player } from './world.ts';
+import { Mobj, Player, type Line, type Sector } from './world.ts';
 
 export interface SoundEvent {
   readonly name: string;
@@ -77,6 +78,12 @@ export class DoomSim {
     this.world = setupWorld(map);
     this.tr = new Traverser(this.world);
     this.pmap = new PMap(this.world, this.tr, this.rng);
+    this.pmap.hooks = {
+      damageMobj: (t, i, s, d) => this.damageMobj(t, i, s, d),
+      touchSpecialThing: (sp, to) => this.touchSpecialThing(sp, to),
+      crossSpecialLine: (l, side, th) => this.crossSpecialLine(l, side, th),
+      setMobjState: (m, s) => this.setMobjState(m, s),
+    };
     this.pmap.gamemap = gamemap;
     this.gamemap = gamemap;
     this.leveltime = 0;
@@ -100,6 +107,9 @@ export class DoomSim {
         this.spawnPlayer(i);
       }
     }
+
+    this.exitPending = null;
+    this.spawnSpecials();
   }
 
   /** Iterate live mobjs in thinker order (for rendering/checksums). */
@@ -264,14 +274,46 @@ export class DoomSim {
     p.extralight = 0;
     p.fixedcolormap = 0;
     p.viewheight = VIEWHEIGHT;
-    // (P_SetupPsprites in M4)
+    this.setupPsprites(p);
   }
 
-  // --- stubs completed in M4 ----------------------------------------------
+  // --- module hook points ---------------------------------------------------
+  // Assigned by install functions of the combat (p_inter/p_pspr/p_map
+  // attacks), specials (p_spec family), and AI (p_enemy/p_sight) modules.
+  // Signatures are the fixed contract; defaults are inert.
 
-  useLines(_player: Player): void {}
-  movePsprites(_player: Player): void {}
-  playerInSpecialSector(_player: Player): void {}
+  /** who got hit by the last aimLineAttack/lineAttack (C linetarget) */
+  linetarget: Mobj | null = null;
+
+  damageMobj: (target: Mobj, inflictor: Mobj | null, source: Mobj | null, damage: number) => void =
+    () => {};
+  touchSpecialThing: (special: Mobj, toucher: Mobj) => void = () => {};
+  aimLineAttack: (t1: Mobj, angle: number, distance: Fixed) => Fixed = () => 0;
+  lineAttack: (t1: Mobj, angle: number, distance: Fixed, slope: Fixed, damage: number) => void =
+    () => {};
+  spawnMissile: (source: Mobj, dest: Mobj, type: number) => Mobj | null = () => null;
+  spawnPlayerMissile: (source: Mobj, type: number) => void = () => {};
+  radiusAttack: (spot: Mobj, source: Mobj | null, damage: number) => void = () => {};
+  checkSight: (t1: Mobj, t2: Mobj) => boolean = () => false;
+
+  crossSpecialLine: (line: Line, side: number, thing: Mobj) => void = () => {};
+  shootSpecialLine: (thing: Mobj, line: Line) => void = () => {};
+  useSpecialLine: (thing: Mobj, line: Line, side: number) => boolean = () => false;
+  playerInSpecialSector: (player: Player) => void = () => {};
+  /** P_SpawnSpecials: called at the end of loadLevel */
+  spawnSpecials: () => void = () => {};
+
+  useLines: (player: Player) => void = () => {};
+  movePsprites: (player: Player) => void = () => {};
+  setupPsprites: (player: Player) => void = () => {};
+
+  /** set by exit specials; the game shell advances the level */
+  exitPending: 'normal' | 'secret' | null = null;
+  exitLevel(secret = false): void {
+    this.exitPending = secret ? 'secret' : 'normal';
+  }
+
+  // --- sound -----------------------------------------------------------------
 
   startSound(mobj: Mobj | null, name: string): void {
     this.soundEvents.push({
@@ -282,9 +324,20 @@ export class DoomSim {
     });
   }
 
-  startSoundNum(mobj: Mobj | null, _sfxId: number): void {
-    // resolved via sounds.gen in M4; keep the call graph identical now
-    this.startSound(mobj, `sfx#${_sfxId}`);
+  startSoundNum(mobj: Mobj | null, sfxId: number): void {
+    const info = sfxinfo[sfxId];
+    this.startSound(mobj, info ? info.name : `sfx#${sfxId}`);
+  }
+
+  /** sector sound (doors/plats), from the sector's sound origin */
+  startSectorSound(sector: Sector, sfxId: number): void {
+    const info = sfxinfo[sfxId];
+    this.soundEvents.push({
+      name: info ? info.name : `sfx#${sfxId}`,
+      x: sector.soundorgX,
+      y: sector.soundorgY,
+      mobj: null,
+    });
   }
 
   // --- the tic ---------------------------------------------------------------
@@ -317,6 +370,6 @@ export class DoomSim {
     this.leveltime++;
   }
 
-  /** P_UpdateSpecials — replaced by the specials module in M4. */
-  updateSpecials(): void {}
+  /** P_UpdateSpecials — assigned by the specials module. */
+  updateSpecials: () => void = () => {};
 }
