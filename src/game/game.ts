@@ -18,7 +18,11 @@ import { TextureStore } from '../render/textures.ts';
 import { FRACUNIT } from '../sim/fixed.ts';
 
 
+import { gunTarget } from '../blocks/gun.ts';
+import { BLOCK_UNITS } from '../blocks/grid.ts';
 import { createGameSim } from '../sim/create.ts';
+import { PlayerState as PS } from '../sim/defs.ts';
+import { Weapon } from '../sim/items.ts';
 import { INPUT_DELAY, NetClient } from '../net/client.ts';
 import type { DoomSim } from '../sim/sim.ts';
 import { textureHeights } from '../sim/specials/floors.ts';
@@ -177,6 +181,45 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
     for (let i = 0; i < INPUT_DELAY; i++) netClient.pushLocalCmd(emptyCmd());
   }
 
+  // block gun aids: world-space target cell outline + center crosshair
+  const previewMesh = new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.BoxGeometry(BLOCK_UNITS + 0.6, BLOCK_UNITS + 0.6, BLOCK_UNITS + 0.6)),
+    new THREE.LineBasicMaterial({ color: 0x66ff66 }),
+  );
+  previewMesh.visible = false;
+  previewMesh.renderOrder = 2;
+
+  const crosshair = document.createElement('div');
+  crosshair.style.cssText =
+    'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);color:#8f8;display:none;' +
+    'font:bold 18px monospace;text-shadow:1px 1px 0 #000;pointer-events:none';
+  crosshair.textContent = '+';
+  root.appendChild(crosshair);
+
+  function updateBlockAids(): void {
+    const p = localPlayer();
+    const active = p.readyweapon === Weapon.BlockGun && p.playerstate === PS.Live && p.mo !== null;
+    crosshair.style.display = active ? 'block' : 'none';
+    if (!active) {
+      previewMesh.visible = false;
+      return;
+    }
+    // gunTarget only touches traversal scratch state — safe from the
+    // render loop and guarantees the preview matches actual placement
+    const target = gunTarget(sim, p);
+    const cell = target.placeCell;
+    if (!cell || sim.blocks.isSolid(cell.bx, cell.by, cell.bz)) {
+      previewMesh.visible = false;
+      return;
+    }
+    previewMesh.position.set(
+      cell.bx * BLOCK_UNITS + BLOCK_UNITS / 2,
+      cell.bz * BLOCK_UNITS + BLOCK_UNITS / 2,
+      -(cell.by * BLOCK_UNITS + BLOCK_UNITS / 2),
+    );
+    previewMesh.visible = true;
+  }
+
   // level state
   let mapNumber = startMap;
   let mapData: MapData;
@@ -237,6 +280,7 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
     scene.add(sprites.group);
     blocksMesh = new BlocksMesh();
     scene.add(blocksMesh.mesh);
+    scene.add(previewMesh);
     sky = makeSky(store, name);
     if (sky) scene.add(sky);
 
@@ -343,10 +387,14 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
         continue;
       }
       if (netClient) {
-        // lockstep: emit our cmd for (simTic + delay), then advance while
-        // both sides' cmds are buffered
+        // lockstep: emit our cmd for (simTic + delay), then advance.
+        // Pace advancement to 1 tic per slot (2 when a backlog built up)
+        // so bursty cmd arrival doesn't turn into view stutter — the
+        // interpolator needs a steady 35Hz cadence.
         netClient.pushLocalCmd(input.buildTicCmd());
+        let allowed = netClient.bufferedAhead() > 6 ? 2 : 1;
         while (
+          allowed-- > 0 &&
           intermission === 0 &&
           netClient.canAdvance() &&
           netClient.simTic < netClient.sendTic
@@ -397,6 +445,7 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
     if (sky) sky.position.copy(camera.position);
     sprites!.update(sim, camera, alpha, mo);
     blocksMesh!.sync(sim.blocks);
+    updateBlockAids();
 
     renderer.clear();
     renderer.render(scene, camera);

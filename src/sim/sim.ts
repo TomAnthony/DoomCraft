@@ -267,8 +267,22 @@ export class DoomSim {
 
   spawnPlayer(playernum: number): void {
     if (!this.playeringame[playernum]) return;
-    const start = this.playerstarts[playernum] ?? this.playerstarts[0];
+    let start = this.playerstarts[playernum] ?? this.playerstarts[0];
     if (!start) throw new Error(`no start for player ${playernum + 1}`);
+
+    // Respawn with a body present (mid-level death): if the own start is
+    // blocked (e.g. the other player stands on it), take the first free
+    // start — vanilla G_DoReborn behavior.
+    const oldMo = this.players[playernum]!.mo;
+    if (oldMo) {
+      const candidates = [start, ...this.playerstarts.filter((s) => s !== null)];
+      for (const c of candidates) {
+        if (c && this.pmap.checkPosition(oldMo, c.x << FRACBITS, c.y << FRACBITS)) {
+          start = c;
+          break;
+        }
+      }
+    }
 
     if (this.players[playernum]!.playerstate === PlayerState.Reborn) {
       this.playerReborn(playernum);

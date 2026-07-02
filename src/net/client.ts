@@ -99,6 +99,13 @@ export class NetClient {
     );
   }
 
+  /** Consecutive future tics for which both cmds are already buffered. */
+  bufferedAhead(): number {
+    let n = 0;
+    while (this.cmds[0]!.has(this.simTic + n) && this.cmds[1]!.has(this.simTic + n)) n++;
+    return n;
+  }
+
   /** Run one lockstep tic. Returns the tic number just simulated. */
   advance(sim: DoomSim): number {
     const tic = this.simTic;
