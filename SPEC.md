@@ -58,6 +58,7 @@ player positions *(planned)*.
 | Space | Jump |
 | 1–8 | Weapon select (8 = block gun) |
 | E | Use (doors, switches) |
+| Tab | Automap overlay (+/- to zoom, follows the player) |
 
 ## 4. The block gun (weapon 8)
 

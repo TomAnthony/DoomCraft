@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { AudioPlayer } from '../audio/audio.ts';
 import { MusicPlayer, musicLumpForMap } from '../audio/music.ts';
+import { Automap } from '../render/automap.ts';
 import { InputHandler, requestLock } from '../input/input.ts';
 import { OptionsMenu } from '../ui/options.ts';
 import { MUS, musicNames } from '../sim/data/sounds.gen.ts';
@@ -189,6 +190,17 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
   });
 
   const hud = new HudView(store, wad, root);
+  const automap = new Automap(root);
+  document.addEventListener('keydown', (e) => {
+    if (e.code === 'Tab') {
+      e.preventDefault(); // keep focus in the game
+      automap.toggle();
+    } else if (automap.visible && (e.code === 'Equal' || e.code === 'NumpadAdd')) {
+      automap.zoom(1.25);
+    } else if (automap.visible && (e.code === 'Minus' || e.code === 'NumpadSubtract')) {
+      automap.zoom(1 / 1.25);
+    }
+  });
   const overlay = document.createElement('div');
   overlay.style.cssText =
     'position:fixed;inset:0;display:none;align-items:center;justify-content:center;' +
@@ -527,5 +539,6 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
     renderer.clearDepth();
     hud.update(sim, p);
     renderer.render(hud.scene, hud.camera);
+    automap.draw(sim, p, renderer.domElement, vx, vy);
   });
 }
