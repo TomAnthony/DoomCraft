@@ -222,7 +222,12 @@ export class LevelMesh {
       geometry.setAttribute('light', new THREE.Float32BufferAttribute(g.lights, 1));
       geometry.setIndex(g.indices);
       const entry = this.store.flatTexture(flatName)!;
-      const mesh = new THREE.Mesh(geometry, makeSurfaceMaterial(entry.texture, false));
+      const material = makeSurfaceMaterial(entry.texture, false);
+      // Sector loop winding varies with map quirks (gap repairs, shared
+      // vertices), so floors/ceilings render double-sided — you can never
+      // legitimately see the far side of a flat anyway.
+      material.side = THREE.DoubleSide;
+      const mesh = new THREE.Mesh(geometry, material);
       mesh.frustumCulled = false;
       this.group.add(mesh);
       this.flatRanges.set(flatName, { geometry, ranges: g.ranges });
@@ -331,6 +336,9 @@ export class LevelMesh {
           : sector.floorHeight;
 
       const geometry = new THREE.PlaneGeometry(entry.pic.width, entry.pic.height);
+      // flip V: our textures put the image top at v=0 (see mobjsprites.ts)
+      const uvAttr = geometry.getAttribute('uv') as THREE.BufferAttribute;
+      for (let vi = 0; vi < uvAttr.count; vi++) uvAttr.setY(vi, 1 - uvAttr.getY(vi));
       const lightValue = fullBright ? 255 : sector.lightLevel;
       const lights = new Float32Array(4).fill(lightValue);
       geometry.setAttribute('light', new THREE.BufferAttribute(lights, 1));

@@ -61,6 +61,10 @@ export class MobjSprites {
    *  sprite size is applied via mesh scale. */
   private makeUnitPlane(): THREE.PlaneGeometry {
     const geo = new THREE.PlaneGeometry(1, 1);
+    // our palette textures have row 0 = image top at v=0; PlaneGeometry
+    // expects v=1 at the top — flip V so sprites render upright
+    const uv = geo.getAttribute('uv') as THREE.BufferAttribute;
+    for (let i = 0; i < uv.count; i++) uv.setY(i, 1 - uv.getY(i));
     geo.setAttribute('light', new THREE.BufferAttribute(new Float32Array(4).fill(255), 1));
     return geo;
   }
