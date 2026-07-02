@@ -17,6 +17,7 @@ import { mobjThinker } from './mobj.ts';
 import { DoomRandom } from './random.ts';
 import { setupWorld, World } from './setup.ts';
 import { ANG45 } from './tables.ts';
+import { ThinkerList } from './thinker.ts';
 import { emptyCmd, copyCmd, type TicCmd } from './ticcmd.ts';
 import { playerThink } from './user.ts';
 import { Mobj, Player } from './world.ts';
@@ -52,11 +53,8 @@ export class DoomSim {
   /** 0-4 = ITYTD..NM; affects thing spawn filtering and reactiontime */
   gameskill = 3; // Ultra-Violence default
 
-  /** head/tail of mobj list in thinker order */
-  private mobjHead: Mobj | null = null;
-  private mobjTail: Mobj | null = null;
-  /** mobjs pending unlink (removed during iteration) */
-  mobjCount = 0;
+  /** all thinkers (mobjs + sector movers) in vanilla execution order */
+  readonly thinkers = new ThinkerList();
 
   /** sound events emitted this tic (read by the audio layer; not state) */
   soundEvents: SoundEvent[] = [];
@@ -82,8 +80,8 @@ export class DoomSim {
     this.pmap.gamemap = gamemap;
     this.gamemap = gamemap;
     this.leveltime = 0;
-    this.mobjHead = this.mobjTail = null;
-    this.mobjCount = 0;
+    this.thinkers.head = this.thinkers.tail = null;
+    this.thinkers.count = 0;
     this.playerstarts = [null, null, null, null];
 
     // P_LoadThings: player starts always recorded; other things
@@ -104,29 +102,10 @@ export class DoomSim {
     }
   }
 
-  // --- thinker list --------------------------------------------------------
-
-  private addMobjThinker(mobj: Mobj): void {
-    mobj.tnext = null;
-    mobj.tprev = this.mobjTail;
-    if (this.mobjTail) this.mobjTail.tnext = mobj;
-    else this.mobjHead = mobj;
-    this.mobjTail = mobj;
-    this.mobjCount++;
-  }
-
-  private unlinkMobjThinker(mobj: Mobj): void {
-    if (mobj.tprev) mobj.tprev.tnext = mobj.tnext;
-    else this.mobjHead = mobj.tnext;
-    if (mobj.tnext) mobj.tnext.tprev = mobj.tprev;
-    else this.mobjTail = mobj.tprev;
-    this.mobjCount--;
-  }
-
   /** Iterate live mobjs in thinker order (for rendering/checksums). */
   *mobjs(): IterableIterator<Mobj> {
-    for (let m = this.mobjHead; m; m = m.tnext) {
-      if (!m.removed) yield m;
+    for (const t of this.thinkers) {
+      if (t instanceof Mobj) yield t;
     }
   }
 
@@ -188,7 +167,8 @@ export class DoomSim {
     else if (z === ONCEILINGZ) mobj.z = (mobj.ceilingz - info.height) | 0;
     else mobj.z = z;
 
-    this.addMobjThinker(mobj);
+    mobj.think = () => mobjThinker(this, mobj);
+    this.thinkers.add(mobj);
     return mobj;
   }
 
@@ -331,22 +311,12 @@ export class DoomSim {
       if (this.playeringame[i]) playerThink(this, this.players[i]!);
     }
 
-    // P_RunThinkers (lazy unlink of removed mobjs). We advance via
-    // m.tnext AFTER thinking, so thinkers appended at the tail during
-    // this tic still run this tic — matching vanilla.
-    let m = this.mobjHead;
-    while (m) {
-      if (m.removed) {
-        const next: Mobj | null = m.tnext;
-        this.unlinkMobjThinker(m);
-        m = next;
-        continue;
-      }
-      mobjThinker(this, m);
-      m = m.tnext;
-    }
+    this.thinkers.run();
 
-    // (P_UpdateSpecials in M4)
+    this.updateSpecials();
     this.leveltime++;
   }
+
+  /** P_UpdateSpecials — replaced by the specials module in M4. */
+  updateSpecials(): void {}
 }

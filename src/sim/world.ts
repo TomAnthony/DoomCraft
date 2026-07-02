@@ -4,6 +4,7 @@
 import type { MobjInfo } from './data/info.gen.ts';
 import { PlayerState, SlopeType } from './defs.ts';
 import type { Fixed } from './fixed.ts';
+import type { Thinker } from './thinker.ts';
 import type { TicCmd } from './ticcmd.ts';
 
 export class Vertex {
@@ -142,8 +143,10 @@ export class Mobj {
   /** set when removed; excluded from thinker iteration */
   removed = false;
   /** thinker list links (vanilla thinkercap order) */
-  tprev: Mobj | null = null;
-  tnext: Mobj | null = null;
+  tprev: Thinker | null = null;
+  tnext: Thinker | null = null;
+  /** assigned by DoomSim.spawnMobj */
+  think: () => void = () => {};
 }
 
 export class Player {
