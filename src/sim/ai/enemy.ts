@@ -257,9 +257,11 @@ export class Enemy {
 
       actor.movedir = DI_NODIR;
       let good = false;
-      let numspechit = sim.pmap.spechit.length;
-      while (numspechit--) {
-        const ld = sim.pmap.spechit[numspechit]!;
+      // consume from the top re-reading the live length (vanilla
+      // `while (numspechit--)` reads the global — specials can mutate
+      // spechit mid-loop, e.g. via teleports)
+      while (sim.pmap.spechit.length > 0) {
+        const ld = sim.pmap.spechit.pop()!;
         // if the special is not a door that can be opened, return false
         if (sim.useSpecialLine(actor, ld, 0)) good = true;
       }

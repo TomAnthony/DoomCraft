@@ -315,11 +315,13 @@ export class PMap {
     thing.y = y;
     setThingPosition(this.w, thing);
 
-    // if any special lines were hit, do the effect
+    // if any special lines were hit, do the effect. Consume from the top
+    // re-reading the live length each pass (vanilla `while (numspechit--)`
+    // reads the global): crossing a teleporter runs teleportMove, which
+    // RESETS spechit mid-loop — a captured length crashes here.
     if (!(thing.flags & (MF.TELEPORT | MF.NOCLIP))) {
-      let n = this.spechit.length;
-      while (n--) {
-        const ld = this.spechit[n]!;
+      while (this.spechit.length > 0) {
+        const ld = this.spechit.pop()!;
         const side = pointOnLineSide(thing.x, thing.y, ld);
         const oldside = pointOnLineSide(oldx, oldy, ld);
         if (side !== oldside) {

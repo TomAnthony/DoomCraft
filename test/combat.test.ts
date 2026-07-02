@@ -102,3 +102,48 @@ describe.skipIf(!wad)('full game integration', () => {
     expect(a.players[0]!.ammo[0]).not.toBe(50);
   });
 });
+
+describe.skipIf(!wad)('teleporter regression', () => {
+  test('spechit reset during crossSpecialLine does not crash tryMove', () => {
+    // EV_Teleport's teleportMove RESETS spechit while tryMove is still
+    // iterating it (vanilla survives via the shared numspechit global; a
+    // captured length indexes an emptied array). Reproduce the mechanism
+    // deterministically: cross a special line with spechit holding two
+    // entries and a crossSpecialLine hook that clears it (as teleports do).
+    const sim = newSim(1);
+    const mo = sim.players[0]!.mo!;
+
+    // find a line we can stand on both sides of
+    let crossed = false;
+    for (const line of sim.world.lines) {
+      const mx = ((line.v1.x + line.v2.x) / 2) | 0;
+      const my = ((line.v1.y + line.v2.y) / 2) | 0;
+      const len = Math.hypot(line.dx / 65536, line.dy / 65536);
+      if (len < 32) continue;
+      const nx = Math.round(((line.dy / 65536) / len) * 24) * 65536;
+      const ny = Math.round(((-line.dx / 65536) / len) * 24) * 65536;
+      if (!sim.pmap.teleportMove(mo, (mx + nx) | 0, (my + ny) | 0)) continue;
+      mo.z = mo.floorz;
+
+      line.special = 97; // make it "special" so the hook fires
+      // teleport-like hook: wipes spechit mid-iteration
+      sim.crossSpecialLine = () => {
+        sim.pmap.spechit.length = 0;
+      };
+      // force TWO pending entries for the crossing
+      const pm = sim.pmap;
+      const origCheck = pm.checkPosition.bind(pm);
+      pm.checkPosition = (thing, x, y) => {
+        const ok = origCheck(thing, x, y);
+        pm.spechit.length = 0;
+        pm.spechit.push(line, line);
+        return ok;
+      };
+
+      expect(() => pm.tryMove(mo, (mx - nx) | 0, (my - ny) | 0)).not.toThrow();
+      crossed = true;
+      break;
+    }
+    expect(crossed).toBe(true);
+  });
+});
