@@ -3,6 +3,15 @@ import tseslint from 'typescript-eslint';
 export default tseslint.config(
   ...tseslint.configs.recommended,
   {
+    rules: {
+      // Allow underscore-prefixed placeholders (M4 stubs etc.).
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
+    },
+  },
+  {
     // Determinism guard: the sim must be a pure integer function of
     // (state, ticcmds). Floats, wall clocks, and ambient randomness are
     // desync bugs waiting to happen — ban them at lint level.
