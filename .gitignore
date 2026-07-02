@@ -1,0 +1,14 @@
+# User-supplied game data — never commit
+*.WAD
+*.wad
+
+# Read-only reference sources (chocolate-doom clone)
+/reference/
+
+# Build artifacts and dependencies
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Editor/OS noise
+.DS_Store
