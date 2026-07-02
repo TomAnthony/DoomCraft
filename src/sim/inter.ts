@@ -190,28 +190,40 @@ function touchSpecialThing(sim: DoomSim, special: Mobj, toucher: Mobj): void {
     // cards — leave cards for everyone (netgame: don't remove)
     case SPR.BKEY:
       giveCard(player, 0);
-      if (sim.netgame) return; // leave keys for the other player
-      break;
+      // Keys always stay in the world: our levels persist across death
+      // (no vanilla level-restart), so a consumed key + death would
+      // softlock the door forever.
+      return;
     case SPR.YKEY:
       giveCard(player, 1);
-      if (sim.netgame) return; // leave keys for the other player
-      break;
+      // Keys always stay in the world: our levels persist across death
+      // (no vanilla level-restart), so a consumed key + death would
+      // softlock the door forever.
+      return;
     case SPR.RKEY:
       giveCard(player, 2);
-      if (sim.netgame) return; // leave keys for the other player
-      break;
+      // Keys always stay in the world: our levels persist across death
+      // (no vanilla level-restart), so a consumed key + death would
+      // softlock the door forever.
+      return;
     case SPR.BSKU:
       giveCard(player, 3);
-      if (sim.netgame) return; // leave keys for the other player
-      break;
+      // Keys always stay in the world: our levels persist across death
+      // (no vanilla level-restart), so a consumed key + death would
+      // softlock the door forever.
+      return;
     case SPR.YSKU:
       giveCard(player, 4);
-      if (sim.netgame) return; // leave keys for the other player
-      break;
+      // Keys always stay in the world: our levels persist across death
+      // (no vanilla level-restart), so a consumed key + death would
+      // softlock the door forever.
+      return;
     case SPR.RSKU:
       giveCard(player, 5);
-      if (sim.netgame) return; // leave keys for the other player
-      break;
+      // Keys always stay in the world: our levels persist across death
+      // (no vanilla level-restart), so a consumed key + death would
+      // softlock the door forever.
+      return;
 
     // medikits, heals
     case SPR.STIM:

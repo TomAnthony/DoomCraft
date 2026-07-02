@@ -114,6 +114,9 @@ interface Voice {
   osc: OscillatorNode[];
   gain: GainNode;
   release: number;
+  channel: number;
+  /** velocity * preset level, before channel volume */
+  velLevel: number;
 }
 
 export class MusicPlayer {
@@ -248,8 +251,15 @@ export class MusicPlayer {
         break;
       case 4: // controller
         if (ev.a === 0) this.patches[ev.channel] = ev.b;
-        else if (ev.a === 3) this.volumes[ev.channel] = ev.b;
-        else if (ev.a === 4) this.pans[ev.channel] = ev.b;
+        else if (ev.a === 3) {
+          this.volumes[ev.channel] = ev.b;
+          // apply volume fades to already-sounding notes too
+          for (const v of this.voices.values()) {
+            if (v.channel === ev.channel) {
+              v.gain.gain.setTargetAtTime(v.velLevel * (ev.b / 127), when, 0.02);
+            }
+          }
+        } else if (ev.a === 4) this.pans[ev.channel] = ev.b;
         break;
       case 2: // pitch wheel (±2 semitones over 0..255, 128 = center)
         this.bends[ev.channel] = ev.a;
@@ -269,8 +279,10 @@ export class MusicPlayer {
     const preset = presetFor(this.patches[channel]!);
     const bend = Math.pow(2, ((this.bends[channel]! - 128) / 128) * (2 / 12));
     const freq = midiFreq(note) * bend;
-    const level =
-      (vol / 127) * (this.volumes[channel]! / 127) * preset.gain * 0.12;
+    const oscCount = preset.detune ? 2 : 1;
+    // divide by oscillator count so detuned presets aren't twice as loud
+    const velLevel = ((vol / 127) * preset.gain * 0.12) / oscCount;
+    const level = velLevel * (this.volumes[channel]! / 127);
 
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0, when);
@@ -292,12 +304,12 @@ export class MusicPlayer {
     mk(0);
     if (preset.detune) mk(preset.detune);
 
-    this.voices.set(k, { osc: oscs, gain, release: preset.release });
+    this.voices.set(k, { osc: oscs, gain, release: preset.release, channel, velLevel });
   }
 
   private percussion(note: number, vol: number, when: number): void {
     const ctx = this.audio.ctx!;
-    const level = (vol / 127) * 0.25;
+    const level = (vol / 127) * (this.volumes[15]! / 127) * 0.25;
     const out = this.audio.musicGain!;
 
     const noise = (dur: number, filterType: BiquadFilterType, freq: number, lvl: number) => {
@@ -308,8 +320,8 @@ export class MusicPlayer {
       f.type = filterType;
       f.frequency.value = freq;
       const g = ctx.createGain();
-      g.gain.setValueAtTime(lvl, when);
-      g.gain.exponentialRampToValueAtTime(0.001, when + dur);
+      g.gain.setValueAtTime(Math.max(0.0005, lvl), when);
+      g.gain.exponentialRampToValueAtTime(0.0005, when + dur);
       src.connect(f).connect(g).connect(out);
       src.start(when);
       src.stop(when + dur + 0.02);
@@ -320,8 +332,8 @@ export class MusicPlayer {
       osc.frequency.setValueAtTime(from, when);
       osc.frequency.exponentialRampToValueAtTime(to, when + dur);
       const g = ctx.createGain();
-      g.gain.setValueAtTime(lvl, when);
-      g.gain.exponentialRampToValueAtTime(0.001, when + dur);
+      g.gain.setValueAtTime(Math.max(0.0005, lvl), when);
+      g.gain.exponentialRampToValueAtTime(0.0005, when + dur);
       osc.connect(g).connect(out);
       osc.start(when);
       osc.stop(when + dur + 0.02);

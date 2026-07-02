@@ -39,7 +39,14 @@ export class AudioPlayer {
       this.sfxGain.connect(this.ctx.destination);
       this.musicGain = this.ctx.createGain();
       this.musicGain.gain.value = this.musicVolume;
-      this.musicGain.connect(this.ctx.destination);
+      // gentle bus compression evens out synth chord peaks
+      const comp = this.ctx.createDynamicsCompressor();
+      comp.threshold.value = -20;
+      comp.knee.value = 12;
+      comp.ratio.value = 4;
+      comp.attack.value = 0.004;
+      comp.release.value = 0.2;
+      this.musicGain.connect(comp).connect(this.ctx.destination);
       this.onReady?.();
     }
     if (this.ctx.state === 'suspended') void this.ctx.resume();
