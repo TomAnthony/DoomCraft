@@ -123,9 +123,14 @@ export class HudView {
 
     // status line
     const ammoType = weaponinfo[player.readyweapon]!.ammo;
-    const ammoText = ammoType === Ammo.NoAmmo ? '-' : String(player.ammo[ammoType]);
+    const ammoText =
+      player.readyweapon === 10
+        ? `BLOCKS ${sim.blocks.count}`
+        : ammoType === Ammo.NoAmmo
+          ? 'AMMO -'
+          : `AMMO ${player.ammo[ammoType]}`;
     this.status.textContent =
-      `HEALTH ${player.health}%   ARMOR ${player.armorpoints}%   AMMO ${ammoText}   ` +
+      `HEALTH ${player.health}%   ARMOR ${player.armorpoints}%   ${ammoText}   ` +
       `FRAGS ${player.frags.reduce((a, b) => a + b, 0)}   KILLS ${player.killcount}/${sim.totalkills}`;
 
     // damage/bonus flash
