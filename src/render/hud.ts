@@ -280,7 +280,15 @@ export class HudView {
 
   private updateStatusBar(sim: DoomSim, player: Player): void {
     this.blit('stbar', 'STBAR', 0, BAR_Y, 3);
-    this.blit('starms', 'STARMS', 104, BAR_Y, 4);
+    // deathmatch: frags replace the arms panel (vanilla)
+    this.blit('starms', sim.deathmatch ? null : 'STARMS', 104, BAR_Y, 4);
+    if (sim.deathmatch) {
+      const frags = player.frags.reduce((a, b) => a + b, 0);
+      this.drawNum('frags', 'STTNUM', frags, 138, BAR_Y + 3, 2);
+    } else {
+      const pool = this.digitPools.get('frags');
+      if (pool) for (const m of pool) m.visible = false;
+    }
 
     // big red ammo (blocks count on the block gun)
     const ammoType = weaponinfo[player.readyweapon]!.ammo;
@@ -310,7 +318,11 @@ export class HudView {
             ? player.weaponowned[Weapon.Shotgun] || player.weaponowned[Weapon.SuperShotgun]
             : player.weaponowned[w - 1]; // key -> weapon index
       const font = owned ? 'STYSNUM' : 'STGNUM';
-      this.blit(`arm${w}`, `${font}${w}`, 111 + col * 12, BAR_Y + 4 + row * 10, 5);
+      this.blit(
+        `arm${w}`,
+        sim.deathmatch ? null : `${font}${w}`,
+        111 + col * 12, BAR_Y + 4 + row * 10, 5,
+      );
     }
 
     // face

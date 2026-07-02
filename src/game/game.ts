@@ -172,7 +172,8 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
   sim.playeringame[0] = true;
   if (netClient) {
     sim.playeringame[1] = true;
-    sim.netgame = true; // co-op pickup rules (weapons stay, keys shared)
+    sim.netgame = true; // weapons stay placed for the other player
+    sim.deathmatch = true; // DM spawn points, all keys, frags
   }
   const localPlayer = () => sim.players[localSlot]!;
 

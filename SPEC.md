@@ -7,11 +7,15 @@ describes. Sections marked *(planned)* are specified but not yet implemented.
 
 ## 1. Product rules
 
-- **Players**: exactly 2, cooperative-hostile ("deathmatch with monsters"):
-  monsters spawn once per level from the single-player THINGS placements and
-  never respawn; players can damage each other (vanilla co-op friendly fire);
-  a cleared level stays clear; a dead player respawns at a player start with
-  pistol + fists + block gun, without resetting the level.
+- **Players**: exactly 2, **deathmatch with monsters**: players spawn at
+  the map's deathmatch starts (randomly selected, vanilla
+  G_DeathMatchSpawnPlayer, teleport fog and all), carry all keys (key
+  pickups don't spawn), and frag each other — the status bar shows frags
+  in place of the arms panel. Monsters spawn once per level from the
+  single-player THINGS placements and never respawn; a cleared level stays
+  clear; a dead player respawns at a free deathmatch start with pistol +
+  fists + block gun, without resetting the level. (Solo debug mode uses
+  single-player rules: player start, keys spawn and are consumed.)
 - **No single-player mode**, no menus/options/automap/savegames/demos-as-a-feature.
 - **Levels**: all 32 maps (MAP01–MAP30 + secret MAP31/MAP32, reached via
   secret exits: 15→31, 31→32, 32→16) from the user's own `DOOM2.WAD`, which is the source

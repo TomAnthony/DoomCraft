@@ -8,7 +8,7 @@
 import type { MapData } from '../wad/maps.ts';
 import { BlockGrid } from '../blocks/grid.ts';
 import { MF, MT, mobjinfo, states, type StateRow } from './data/info.gen.ts';
-import { sfxinfo } from './data/sounds.gen.ts';
+import { SFX, sfxinfo } from './data/sounds.gen.ts';
 import {
   MAXPLAYERS, ONCEILINGZ, ONFLOORZ, PlayerState, VIEWHEIGHT,
 } from './defs.ts';
@@ -18,7 +18,7 @@ import { setThingPosition, unsetThingPosition, Traverser } from './maputl.ts';
 import { mobjThinker } from './mobj.ts';
 import { DoomRandom } from './random.ts';
 import { setupWorld, World } from './setup.ts';
-import { ANG45 } from './tables.ts';
+import { ANG45, ANGLETOFINESHIFT, finecosine, finesine } from './tables.ts';
 import { ThinkerList } from './thinker.ts';
 import { emptyCmd, copyCmd, type TicCmd } from './ticcmd.ts';
 import { playerThink } from './user.ts';
@@ -49,6 +49,7 @@ export class DoomSim {
   readonly players: Player[] = [];
   readonly playeringame: boolean[] = [];
   playerstarts: (MapThingSpawn | null)[] = [null, null, null, null];
+  deathmatchstarts: MapThingSpawn[] = [];
 
   leveltime = 0;
   gamemap = 1;
@@ -56,6 +57,8 @@ export class DoomSim {
   gameskill = 3; // Ultra-Violence default
   /** netgame pickup rules (weapons stay placed, keys shared) vs solo */
   netgame = false;
+  /** deathmatch-with-monsters: DM spawn points, all keys, no key things */
+  deathmatch = false;
 
   /** all thinkers (mobjs + sector movers) in vanilla execution order */
   readonly thinkers = new ThinkerList();
@@ -103,11 +106,16 @@ export class DoomSim {
     this.blocks.clear();
     this.playerstarts = [null, null, null, null];
 
-    // P_LoadThings: player starts always recorded; other things
+    // P_LoadThings: player/deathmatch starts recorded; other things
     // spawn from M4 onward (opts.spawnThings).
+    this.deathmatchstarts = [];
     for (const t of map.things) {
       if (t.type >= 1 && t.type <= 4) {
         this.playerstarts[t.type - 1] = { ...t };
+        continue;
+      }
+      if (t.type === 11) {
+        if (this.deathmatchstarts.length < 10) this.deathmatchstarts.push({ ...t });
         continue;
       }
       if (opts?.spawnThings) this.spawnMapThing(t);
@@ -237,6 +245,9 @@ export class DoomSim {
       throw new Error(`P_SpawnMapThing: unknown type ${mthing.type} at (${mthing.x}, ${mthing.y})`);
     }
 
+    // don't spawn keycards in deathmatch (players get all keys)
+    if (this.deathmatch && mobjinfo[i]!.flags & MF.NOTDMATCH) return;
+
     const x = mthing.x << FRACBITS;
     const y = mthing.y << FRACBITS;
     const z = mobjinfo[i]!.flags & MF.SPAWNCEILING ? ONCEILINGZ : ONFLOORZ;
@@ -265,21 +276,49 @@ export class DoomSim {
     this.players[playernum] = p;
   }
 
+  /** G_CheckSpot (simplified): can playernum spawn at this spot? */
+  private spotFree(playernum: number, spot: MapThingSpawn): boolean {
+    const x = spot.x << FRACBITS;
+    const y = spot.y << FRACBITS;
+    const mo = this.players[playernum]!.mo;
+    if (!mo) {
+      // first spawn of the level: only other players could be in the way
+      for (let i = 0; i < MAXPLAYERS; i++) {
+        const other = this.players[i]!.mo;
+        if (i !== playernum && other && other.x === x && other.y === y) return false;
+      }
+      return true;
+    }
+    return this.pmap.checkPosition(mo, x, y);
+  }
+
   spawnPlayer(playernum: number): void {
     if (!this.playeringame[playernum]) return;
     let start = this.playerstarts[playernum] ?? this.playerstarts[0];
     if (!start) throw new Error(`no start for player ${playernum + 1}`);
+    let dmSpawn = false;
 
-    // Respawn with a body present (mid-level death): if the own start is
-    // blocked (e.g. the other player stands on it), take the first free
-    // start — vanilla G_DoReborn behavior.
-    const oldMo = this.players[playernum]!.mo;
-    if (oldMo) {
-      const candidates = [start, ...this.playerstarts.filter((s) => s !== null)];
-      for (const c of candidates) {
-        if (c && this.pmap.checkPosition(oldMo, c.x << FRACBITS, c.y << FRACBITS)) {
-          start = c;
+    if (this.deathmatch && this.deathmatchstarts.length > 0) {
+      // G_DeathMatchSpawnPlayer: 20 random tries, else own player start.
+      for (let j = 0; j < 20; j++) {
+        const i = this.rng.pRandom() % this.deathmatchstarts.length;
+        if (this.spotFree(playernum, this.deathmatchstarts[i]!)) {
+          start = this.deathmatchstarts[i]!;
+          dmSpawn = true;
           break;
+        }
+      }
+    } else {
+      // Co-op-style respawn: if the own start is blocked (e.g. the other
+      // player stands on it), take the first free start (G_DoReborn).
+      const oldMo = this.players[playernum]!.mo;
+      if (oldMo) {
+        const candidates = [start, ...this.playerstarts.filter((s) => s !== null)];
+        for (const c of candidates) {
+          if (c && this.spotFree(playernum, c)) {
+            start = c;
+            break;
+          }
         }
       }
     }
@@ -309,6 +348,21 @@ export class DoomSim {
     p.fixedcolormap = 0;
     p.viewheight = VIEWHEIGHT;
     this.setupPsprites(p);
+
+    // deathmatch: give all cards (keys don't spawn) + teleport fog/sound
+    if (this.deathmatch) {
+      p.cards = [true, true, true, true, true, true];
+      if (dmSpawn) {
+        const fine = mobj.angle >>> ANGLETOFINESHIFT;
+        const fog = this.spawnMobj(
+          (mobj.x + 20 * finecosine(fine)) | 0,
+          (mobj.y + 20 * finesine[fine]!) | 0,
+          mobj.z,
+          MT.TFOG,
+        );
+        this.startSoundNum(fog, SFX.telept);
+      }
+    }
   }
 
   // --- module hook points ---------------------------------------------------
