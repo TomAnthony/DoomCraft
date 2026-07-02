@@ -128,27 +128,54 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
   }
 
   const renderer = new THREE.WebGLRenderer({ antialias: false });
-  renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.autoClear = false;
-  root.appendChild(renderer.domElement);
-  const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 20000);
-  window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
+  root.style.background = '#000';
+  const canvas = renderer.domElement;
+  canvas.style.position = 'absolute';
+  canvas.style.left = '50%';
+  canvas.style.top = '50%';
+  canvas.style.transform = 'translate(-50%, -50%)';
+  root.appendChild(canvas);
+  const camera = new THREE.PerspectiveCamera(75, 4 / 3, 1, 20000);
+
+  // Vanilla is a 4:3 display; when locked, letterbox/pillarbox to the
+  // largest 4:3 rectangle that fits (also gives the HUD its authentic
+  // non-square-pixel proportions).
+  let aspectLock = true;
+  function applySize(): void {
+    let w = window.innerWidth;
+    let h = window.innerHeight;
+    if (aspectLock) {
+      if (w / h > 4 / 3) w = Math.round((h * 4) / 3);
+      else h = Math.round((w * 3) / 4);
+    }
+    renderer.setSize(w, h);
+    camera.aspect = w / h;
     camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  });
+  }
+  applySize();
+  window.addEventListener('resize', applySize);
 
   const input = new InputHandler();
   input.attach(renderer.domElement);
   renderer.domElement.addEventListener('click', () => audio.resume());
 
   const music = new MusicPlayer(wad, audio);
-  const options = new OptionsMenu(root, audio, input, () => {
-    options.hide();
-    requestLock(renderer.domElement);
-    audio.resume();
-  });
+  const options = new OptionsMenu(
+    root,
+    audio,
+    input,
+    () => {
+      options.hide();
+      requestLock(renderer.domElement);
+      audio.resume();
+    },
+    (locked) => {
+      aspectLock = locked;
+      applySize();
+    },
+  );
   // Esc exits pointer lock; that's the options key. Only after the game
   // was actually captured once (not on the initial click-to-play screen).
   let wasLocked = false;

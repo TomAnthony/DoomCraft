@@ -10,27 +10,35 @@ interface Saved {
   music: number;
   sfx: number;
   sensitivity: number;
+  aspect43: boolean;
 }
 
 function load(): Saved {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return { music: 0.5, sfx: 0.6, sensitivity: 1, ...JSON.parse(raw) };
+    if (raw) return { music: 0.5, sfx: 0.6, sensitivity: 1, aspect43: true, ...JSON.parse(raw) };
   } catch {
     // ignore
   }
-  return { music: 0.5, sfx: 0.6, sensitivity: 1 };
+  return { music: 0.5, sfx: 0.6, sensitivity: 1, aspect43: true };
 }
 
 export class OptionsMenu {
   private readonly panel: HTMLDivElement;
   visible = false;
 
-  constructor(root: HTMLElement, audio: AudioPlayer, input: InputHandler, onResume: () => void) {
+  constructor(
+    root: HTMLElement,
+    audio: AudioPlayer,
+    input: InputHandler,
+    onResume: () => void,
+    onAspect?: (locked: boolean) => void,
+  ) {
     const saved = load();
     audio.setMusicVolume(saved.music);
     audio.setSfxVolume(saved.sfx);
     input.sensitivity = saved.sensitivity;
+    onAspect?.(saved.aspect43);
 
     this.panel = document.createElement('div');
     this.panel.style.cssText =
@@ -47,9 +55,13 @@ export class OptionsMenu {
           <span style="display:block;margin-bottom:4px;color:#e88">SOUND VOLUME</span>
           <input id="opt-sfx" type="range" min="0" max="100" style="width:100%">
         </label>
-        <label style="display:block;margin-bottom:24px">
+        <label style="display:block;margin-bottom:16px">
           <span style="display:block;margin-bottom:4px;color:#e88">MOUSE SENSITIVITY</span>
           <input id="opt-sens" type="range" min="10" max="300" style="width:100%">
+        </label>
+        <label style="display:block;margin-bottom:24px;cursor:pointer">
+          <input id="opt-aspect" type="checkbox" style="margin-right:8px">
+          <span style="color:#e88">4:3 ASPECT RATIO (letterbox)</span>
         </label>
         <button id="opt-resume" style="width:100%;padding:10px;background:#822;color:#fff;
           border:none;font:bold 18px monospace;cursor:pointer">RESUME (or click the game)</button>
@@ -59,9 +71,11 @@ export class OptionsMenu {
     const music = this.panel.querySelector('#opt-music') as HTMLInputElement;
     const sfx = this.panel.querySelector('#opt-sfx') as HTMLInputElement;
     const sens = this.panel.querySelector('#opt-sens') as HTMLInputElement;
+    const aspect = this.panel.querySelector('#opt-aspect') as HTMLInputElement;
     music.value = String(Math.round(saved.music * 100));
     sfx.value = String(Math.round(saved.sfx * 100));
     sens.value = String(Math.round(saved.sensitivity * 100));
+    aspect.checked = saved.aspect43;
 
     const persist = () => {
       try {
@@ -71,6 +85,7 @@ export class OptionsMenu {
             music: Number(music.value) / 100,
             sfx: Number(sfx.value) / 100,
             sensitivity: Number(sens.value) / 100,
+            aspect43: aspect.checked,
           }),
         );
       } catch {
@@ -87,6 +102,10 @@ export class OptionsMenu {
     });
     sens.addEventListener('input', () => {
       input.sensitivity = Number(sens.value) / 100;
+      persist();
+    });
+    aspect.addEventListener('change', () => {
+      onAspect?.(aspect.checked);
       persist();
     });
     (this.panel.querySelector('#opt-resume') as HTMLButtonElement).addEventListener(
