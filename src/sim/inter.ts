@@ -62,7 +62,7 @@ function giveAmmo(sim: DoomSim, player: Player, ammo: number, num: number): bool
 
 function giveWeapon(sim: DoomSim, player: Player, weapon: number, dropped: boolean): boolean {
   // netgame (non-altdeath) non-dropped: leave placed weapons forever
-  if (!dropped) {
+  if (sim.netgame && !dropped) {
     if (player.weaponowned[weapon]) return false;
     player.bonuscount += BONUSADD;
     player.weaponowned[weapon] = true;
@@ -72,9 +72,11 @@ function giveWeapon(sim: DoomSim, player: Player, weapon: number, dropped: boole
     return false;
   }
 
+  // single-player / dropped weapons: picking up an owned weapon still
+  // gives ammo (one clip if dropped, two if placed) and removes it
   let gaveammo = false;
   if (weaponinfo[weapon]!.ammo !== Ammo.NoAmmo) {
-    gaveammo = giveAmmo(sim, player, weaponinfo[weapon]!.ammo, 1); // one clip, dropped
+    gaveammo = giveAmmo(sim, player, weaponinfo[weapon]!.ammo, dropped ? 1 : 2);
   }
   let gaveweapon = false;
   if (!player.weaponowned[weapon]) {
@@ -187,22 +189,28 @@ function touchSpecialThing(sim: DoomSim, special: Mobj, toucher: Mobj): void {
     // cards — leave cards for everyone (netgame: don't remove)
     case SPR.BKEY:
       giveCard(player, 0);
-      return;
+      if (sim.netgame) return; // leave keys for the other player
+      break;
     case SPR.YKEY:
       giveCard(player, 1);
-      return;
+      if (sim.netgame) return; // leave keys for the other player
+      break;
     case SPR.RKEY:
       giveCard(player, 2);
-      return;
+      if (sim.netgame) return; // leave keys for the other player
+      break;
     case SPR.BSKU:
       giveCard(player, 3);
-      return;
+      if (sim.netgame) return; // leave keys for the other player
+      break;
     case SPR.YSKU:
       giveCard(player, 4);
-      return;
+      if (sim.netgame) return; // leave keys for the other player
+      break;
     case SPR.RSKU:
       giveCard(player, 5);
-      return;
+      if (sim.netgame) return; // leave keys for the other player
+      break;
 
     // medikits, heals
     case SPR.STIM:

@@ -74,6 +74,10 @@ export class MobjSprites {
     const seen = new Set<Mobj>();
     for (const mobj of sim.mobjs()) {
       if (mobj === skip) continue;
+      // Invisible markers (teleport destinations etc.): vanilla never
+      // draws NOSECTOR things — without this they render as frozen imps
+      // (S_NULL's state row points at the TROO sprite).
+      if (mobj.flags & MF.NOSECTOR) continue;
       seen.add(mobj);
       let t = this.tracked.get(mobj);
       if (!t) {

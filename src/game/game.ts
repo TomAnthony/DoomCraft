@@ -166,7 +166,10 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
 
   const sim = createGameSim();
   sim.playeringame[0] = true;
-  if (netClient) sim.playeringame[1] = true;
+  if (netClient) {
+    sim.playeringame[1] = true;
+    sim.netgame = true; // co-op pickup rules (weapons stay, keys shared)
+  }
   const localPlayer = () => sim.players[localSlot]!;
 
   // prefill the input-delay buffer so both sims can start immediately
@@ -256,6 +259,21 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
 
   loadLevel(mapNumber);
 
+  // debug handle for scripted verification (harmless in production)
+  (window as unknown as { __dc: unknown }).__dc = {
+    sim,
+    exit: () => sim.exitLevel(),
+    kill: () => sim.damageMobj(localPlayer().mo!, null, null, 10000),
+    where: () => ({
+      map: mapNumber,
+      x: localPlayer().mo!.x / 65536,
+      y: localPlayer().mo!.y / 65536,
+      health: localPlayer().health,
+      state: localPlayer().playerstate,
+      mobjs: [...sim.mobjs()].length,
+    }),
+  };
+
   // Runs after every simulated tic (solo and net take the same path).
   let intermission = 0;
   function postTic(): void {
@@ -267,22 +285,30 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
       y: curView.y,
       angle: bamToRad(localPlayer().mo!.angle),
     });
-    if (intermission > 0) {
-      intermission--;
-      if (intermission === 0) {
-        overlay.style.display = 'none';
-        const secret = sim.exitPending === 'secret';
-        finishLevel(sim);
-        loadLevel(nextMap(mapNumber, secret));
-      }
-    } else if (sim.exitPending) {
+    // Exit fired this tic: freeze the sim (vanilla pauses the world at
+    // intermission; lockstep-safe because both peers hit it on the same
+    // sim tic and resume with the same buffered cmd sequence).
+    if (sim.exitPending && intermission === 0) {
       const p = localPlayer();
       overlay.textContent =
         `${`MAP${String(mapNumber).padStart(2, '0')}`} COMPLETE\n\n` +
         `KILLS ${p.killcount}/${sim.totalkills}   ITEMS ${p.itemcount}/${sim.totalitems}   SECRETS ${p.secretcount}`;
       overlay.style.display = 'flex';
-      intermission = 105; // 3 seconds; sim keeps ticking (lockstep-safe)
+      intermission = 105; // 3 seconds
     }
+  }
+
+  /** One paused intermission tic; true if the tic slot was consumed. */
+  function tickIntermission(): boolean {
+    if (intermission === 0) return false;
+    intermission--;
+    if (intermission === 0) {
+      overlay.style.display = 'none';
+      const secret = sim.exitPending === 'secret';
+      finishLevel(sim);
+      loadLevel(nextMap(mapNumber, secret));
+    }
+    return true;
   }
 
   const waiting = document.createElement('div');
@@ -310,11 +336,21 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
 
     let ran = 0;
     while (acc >= TIC_MS && ran < 4) {
+      if (tickIntermission()) {
+        lastAdvance = now;
+        acc -= TIC_MS;
+        ran++;
+        continue;
+      }
       if (netClient) {
         // lockstep: emit our cmd for (simTic + delay), then advance while
         // both sides' cmds are buffered
         netClient.pushLocalCmd(input.buildTicCmd());
-        while (netClient.canAdvance() && netClient.simTic < netClient.sendTic) {
+        while (
+          intermission === 0 &&
+          netClient.canAdvance() &&
+          netClient.simTic < netClient.sendTic
+        ) {
           netClient.advance(sim);
           postTic();
           lastAdvance = now;

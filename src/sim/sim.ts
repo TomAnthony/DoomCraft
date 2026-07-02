@@ -54,6 +54,8 @@ export class DoomSim {
   gamemap = 1;
   /** 0-4 = ITYTD..NM; affects thing spawn filtering and reactiontime */
   gameskill = 3; // Ultra-Violence default
+  /** netgame pickup rules (weapons stay placed, keys shared) vs solo */
+  netgame = false;
 
   /** all thinkers (mobjs + sector movers) in vanilla execution order */
   readonly thinkers = new ThinkerList();
@@ -115,8 +117,13 @@ export class DoomSim {
       if (this.playeringame[i]) {
         // Fresh players are reborn (pistol start); players carried over
         // from a previous level keep their inventory (vanilla co-op).
-        if (!this.players[i]!.mo) this.players[i]!.playerstate = PlayerState.Reborn;
-        this.players[i]!.mo = null;
+        // A player who is dead at the transition also reborns — never
+        // carry a corpse into the next level.
+        const p = this.players[i]!;
+        if (!p.mo || p.playerstate !== PlayerState.Live || p.health <= 0) {
+          p.playerstate = PlayerState.Reborn;
+        }
+        p.mo = null;
         this.spawnPlayer(i);
       }
     }

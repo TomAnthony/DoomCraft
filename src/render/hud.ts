@@ -233,8 +233,8 @@ export class HudView {
           mesh.material = this.cubeMaterial;
           mesh.scale.set(110, 110, 1);
         }
-        const left = 195 + sx;
-        const top = (sy - 32) + BAR_Y - 90 - (attacking ? 14 : 0);
+        const left = 168 + sx;
+        const top = (sy - 32) + BAR_Y - 35 - (attacking ? 14 : 0);
         mesh.position.set(left + 55, top + 55, i);
         mesh.visible = true;
         continue;
