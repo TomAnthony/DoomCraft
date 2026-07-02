@@ -157,8 +157,13 @@ export class MobjSprites {
         lightAttr.needsUpdate = true;
       }
 
-      // sprite top at z + topOffset
-      const centerY = z + entry.pic.topOffset - entry.pic.height / 2;
+      // sprite top at z + topOffset (vanilla vt). Many sprites have
+      // topOffset < height; vanilla clipped the overhang at the ground
+      // line, but in true 3D it sinks through the floor — so clamp the
+      // bottom to z for grounded things (GZDoom-style smart clipping).
+      let bottom = entry.pic.topOffset - entry.pic.height;
+      if (bottom < 0 && mobj.z <= mobj.floorz) bottom = 0;
+      const centerY = z + bottom + entry.pic.height / 2;
       t.mesh.position.set(x, centerY, -y);
       t.mesh.rotation.y = Math.atan2(camX - x, y - camY);
       t.mesh.visible = true;

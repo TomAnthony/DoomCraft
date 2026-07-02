@@ -343,8 +343,12 @@ export class LevelMesh {
       const lights = new Float32Array(4).fill(lightValue);
       geometry.setAttribute('light', new THREE.BufferAttribute(lights, 1));
       const mesh = new THREE.Mesh(geometry, this.spriteMaterial(lump.lumpName));
-      // Sprite top sits at z + topOffset (vanilla vt).
-      const centerY = z + entry.pic.topOffset - entry.pic.height / 2;
+      // Sprite top at z + topOffset, with the bottom clamped to the floor
+      // for grounded things (see mobjsprites.ts).
+      const isGrounded = !(info.flags & MF.SPAWNCEILING) && !(info.flags & MF.NOGRAVITY);
+      let bottomOff = entry.pic.topOffset - entry.pic.height;
+      if (bottomOff < 0 && isGrounded) bottomOff = 0;
+      const centerY = z + bottomOff + entry.pic.height / 2;
       mesh.position.set(thing.x, centerY, -thing.y);
       this.group.add(mesh);
       this.sprites.push({
