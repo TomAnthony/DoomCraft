@@ -19,6 +19,8 @@ export interface Listener {
 export class AudioPlayer {
   ctx: AudioContext | null = null;
   private buffers = new Map<string, AudioBuffer | null>();
+  /** one playing source per origin (vanilla channel stealing) */
+  private channels = new Map<unknown, AudioBufferSourceNode>();
   private sfxGain: GainNode | null = null;
   musicGain: GainNode | null = null;
   private sfxVolume = 0.6;
@@ -112,6 +114,19 @@ export class AudioPlayer {
         pan = -Math.sin(angleTo) * 0.75;
       }
 
+      // Vanilla channel semantics: a new sound from the same origin
+      // stops the old one (the chainsaw relies on this — releasing the
+      // trigger makes the idle sound cut the sawing sound immediately).
+      const key = ev.mobj ?? `xy:${ev.x},${ev.y}`;
+      const prev = this.channels.get(key);
+      if (prev) {
+        try {
+          prev.stop();
+        } catch {
+          // already ended
+        }
+      }
+
       const src = this.ctx.createBufferSource();
       src.buffer = buffer;
       const gain = this.ctx.createGain();
@@ -119,6 +134,10 @@ export class AudioPlayer {
       const panner = this.ctx.createStereoPanner();
       panner.pan.value = Math.max(-1, Math.min(1, pan));
       src.connect(gain).connect(panner).connect(this.sfxGain!);
+      src.onended = () => {
+        if (this.channels.get(key) === src) this.channels.delete(key);
+      };
+      this.channels.set(key, src);
       src.start();
     }
   }
