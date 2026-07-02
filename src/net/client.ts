@@ -146,6 +146,25 @@ export class NetClient {
     return this.cmds[player]!.get(tic) ?? emptyCmd();
   }
 
+  /**
+   * Total view turn sitting in local cmds that are sent but not yet
+   * simulated (BAM). The camera adds this on top of mo.angle — without
+   * it, every turn disappears for INPUT_DELAY tics after being consumed
+   * from the mouse accumulator, which reads as severe look jitter.
+   */
+  pendingLocalTurn(): { yaw: number; pitch: number } {
+    let yaw = 0;
+    let pitch = 0;
+    for (let t = this.simTic; t < this.sendTic; t++) {
+      const c = this.cmds[this.slot]!.get(t);
+      if (c) {
+        yaw = (yaw + (c.angleturn << 16)) | 0;
+        pitch = (pitch + (c.pitch << 16)) | 0;
+      }
+    }
+    return { yaw, pitch };
+  }
+
   /** Clear desync state after a successful replay resync. */
   clearDesync(): void {
     this.desync = null;

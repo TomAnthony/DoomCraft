@@ -19,12 +19,10 @@ for (const [name, page] of [['A', pageA], ['B', pageB]] as const) {
 
 // Player A creates the room.
 await pageA.goto(`${base}/?server=${encodeURIComponent(relay)}&map=1`);
-await pageA.waitForFunction(() => document.body.textContent?.includes('Room code:'), null, {
-  timeout: 15000,
-});
-const roomText = await pageA.evaluate(() => document.body.textContent ?? '');
-const room = /Room code: ([A-Z]{4})/.exec(roomText)?.[1];
-if (!room) throw new Error(`no room code found in: ${roomText.slice(0, 200)}`);
+await pageA.waitForSelector('#lobby-url', { timeout: 15000 });
+const joinUrl = await pageA.inputValue('#lobby-url');
+const room = /room=([A-Z]{4})/.exec(joinUrl)?.[1];
+if (!room) throw new Error(`no room code in invite url: ${joinUrl}`);
 console.log(`room ${room} created`);
 
 // Player B joins.

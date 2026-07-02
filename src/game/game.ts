@@ -469,22 +469,16 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
   let acc = 0;
   let last = performance.now();
   let lastAdvance = performance.now();
+  let lastFrame = performance.now();
 
-  renderer.setAnimationLoop(() => {
-    const now = performance.now();
+  function pumpTics(now: number): void {
     acc += now - last;
     last = now;
 
-    if (netClient && netClient.peerLeft) {
-      overlay.textContent = 'PEER DISCONNECTED';
-      overlay.style.display = 'flex';
-    } else if (netClient && netClient.desync !== null) {
+    if (netClient && netClient.desync !== null) {
       // Try replay-based recovery; two desyncs within 30s means a
       // systematic determinism bug — give up rather than thrash.
-      if (now - lastResyncAt < 30000) {
-        overlay.textContent = `DESYNC at tic ${netClient.desync} — please restart`;
-        overlay.style.display = 'flex';
-      } else {
+      if (now - lastResyncAt >= 30000) {
         lastResyncAt = now;
         resyncFromLog();
       }
@@ -499,12 +493,19 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
         continue;
       }
       if (netClient) {
+        // frozen while a desync awaits resync (or the fatal overlay)
+        if (netClient.desync !== null) {
+          lastAdvance = now;
+          acc -= TIC_MS;
+          ran++;
+          continue;
+        }
         // lockstep: emit our cmd for (simTic + delay), then advance.
-        // Pace advancement to 1 tic per slot (2 when a backlog built up)
-        // so bursty cmd arrival doesn't turn into view stutter — the
-        // interpolator needs a steady 35Hz cadence.
+        // Pace advancement to 1 tic per slot so bursty cmd arrival
+        // doesn't turn into view stutter; scale catch-up with backlog.
         netClient.pushLocalCmd(input.buildTicCmd());
-        let allowed = netClient.bufferedAhead() > 6 ? 2 : 1;
+        const ahead = netClient.bufferedAhead();
+        let allowed = ahead > 20 ? 4 : ahead > 6 ? 2 : 1;
         while (
           allowed-- > 0 &&
           intermission === 0 &&
@@ -524,6 +525,30 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
       ran++;
     }
     if (ran === 4) acc = 0;
+  }
+
+  // Watchdog: browsers throttle rAF in unfocused/occluded windows, which
+  // would starve the peer of our cmds (two-windows-on-one-machine testing,
+  // or a backgrounded player). Keep the game ticking regardless.
+  const watchdog = window.setInterval(() => {
+    const now = performance.now();
+    if (now - lastFrame > 80) pumpTics(now);
+  }, 28);
+  void watchdog;
+
+  renderer.setAnimationLoop(() => {
+    const now = performance.now();
+    lastFrame = now;
+
+    if (netClient && netClient.peerLeft) {
+      overlay.textContent = 'PEER DISCONNECTED';
+      overlay.style.display = 'flex';
+    } else if (netClient && netClient.desync !== null && performance.now() - lastResyncAt < 30000) {
+      overlay.textContent = `DESYNC at tic ${netClient.desync} — please restart`;
+      overlay.style.display = 'flex';
+    }
+
+    pumpTics(now);
 
     waiting.style.display =
       netClient && now - lastAdvance > 350 && !netClient.peerLeft ? 'block' : 'none';
@@ -537,11 +562,16 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
     const vy = prevView.y + (curView.y - prevView.y) * alpha;
     const vz = prevView.z + (curView.z - prevView.z) * alpha;
     camera.position.set(vx, vz, -vy);
-    const yaw = bamToRad((mo.angle + (input.pendingYawTurn() << 16)) | 0);
+    // Latency-free look: sim angle + turn queued in sent-but-unsimulated
+    // cmds (lockstep applies our cmds INPUT_DELAY tics later — without
+    // this term every turn vanishes for ~86ms after being consumed) +
+    // the not-yet-consumed mouse delta.
+    const queued = netClient ? netClient.pendingLocalTurn() : { yaw: 0, pitch: 0 };
+    const yaw = bamToRad((mo.angle + queued.yaw + (input.pendingYawTurn() << 16)) | 0);
     const pitch =
       p.playerstate === PlayerState.Dead
         ? 0
-        : bamToRad((mo.pitch + (input.pendingPitchTurn() << 16)) | 0);
+        : bamToRad((mo.pitch + queued.pitch + (input.pendingPitchTurn() << 16)) | 0);
     camera.rotation.set(pitch, yaw - Math.PI / 2, 0, 'YXZ');
 
     // world geometry interpolation
