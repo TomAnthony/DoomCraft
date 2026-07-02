@@ -61,8 +61,9 @@ function giveAmmo(sim: DoomSim, player: Player, ammo: number, num: number): bool
 }
 
 function giveWeapon(sim: DoomSim, player: Player, weapon: number, dropped: boolean): boolean {
-  // netgame (non-altdeath) non-dropped: leave placed weapons forever
-  if (sim.netgame && !dropped) {
+  // netgame co-op: leave placed weapons forever. In deathmatch weapons
+  // are consumed like altdeath — they enter the respawn queue instead.
+  if (sim.netgame && !sim.deathmatch && !dropped) {
     if (player.weaponowned[weapon]) return false;
     player.bonuscount += BONUSADD;
     player.weaponowned[weapon] = true;

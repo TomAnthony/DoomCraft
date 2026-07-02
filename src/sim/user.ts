@@ -78,14 +78,19 @@ function movePlayer(sim: DoomSim, player: Player): void {
   if (mo.pitch > MAXPITCH) mo.pitch = MAXPITCH;
   if (mo.pitch < -MAXPITCH) mo.pitch = -MAXPITCH;
 
-  // Do not let the player control movement if not onground.
+  // Do not let the player control movement if not onground —
+  // except for a small GZDoom-style air control (part of the jump
+  // deviation; without it, mantling ledges mid-jump needs frame-perfect
+  // running starts because vanilla gives zero mid-air steering).
   player.onground = mo.z <= mo.floorz;
 
-  if (cmd.forwardmove && player.onground) {
-    thrust(player, mo.angle, cmd.forwardmove * 2048);
+  if (cmd.forwardmove) {
+    const move = cmd.forwardmove * 2048;
+    thrust(player, mo.angle, player.onground ? move : move >> 4);
   }
-  if (cmd.sidemove && player.onground) {
-    thrust(player, (mo.angle - ANG90) | 0, cmd.sidemove * 2048);
+  if (cmd.sidemove) {
+    const move = cmd.sidemove * 2048;
+    thrust(player, (mo.angle - ANG90) | 0, player.onground ? move : move >> 4);
   }
 
   // Jump (deviation, GZDoom-style).

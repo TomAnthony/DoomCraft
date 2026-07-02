@@ -152,7 +152,8 @@ export class HudView {
     return mesh;
   }
 
-  /** Show a lump at top-left (x, y); hides the slot if lump missing. */
+  /** V_DrawPatch: draw a lump at (x, y) honoring its embedded offsets
+   *  (the mugshot carries (-5,-2), keys (0,-1), etc). */
   private blit(key: string, lumpName: string | null, x: number, y: number, z = 5): void {
     const mesh = this.slot(key);
     if (!lumpName) {
@@ -166,7 +167,9 @@ export class HudView {
     }
     mesh.material = this.material(lumpName);
     mesh.scale.set(entry.width, entry.height, 1);
-    mesh.position.set(x + entry.width / 2, y + entry.height / 2, z);
+    const left = x - entry.pic.leftOffset;
+    const top = y - entry.pic.topOffset;
+    mesh.position.set(left + entry.width / 2, top + entry.height / 2, z);
     mesh.visible = true;
   }
 

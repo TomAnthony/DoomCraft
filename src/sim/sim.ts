@@ -14,7 +14,7 @@ import {
 } from './defs.ts';
 import { FRACBITS, type Fixed } from './fixed.ts';
 import { PMap } from './map.ts';
-import { setThingPosition, unsetThingPosition, Traverser } from './maputl.ts';
+import { pointInSubsector, setThingPosition, unsetThingPosition, Traverser } from './maputl.ts';
 import { mobjThinker } from './mobj.ts';
 import { DoomRandom } from './random.ts';
 import { setupWorld, World } from './setup.ts';
@@ -104,6 +104,7 @@ export class DoomSim {
     this.thinkers.head = this.thinkers.tail = null;
     this.thinkers.count = 0;
     this.blocks.clear();
+    this.itemRespawnQueue = [];
     this.playerstarts = [null, null, null, null];
 
     // P_LoadThings: player/deathmatch starts recorded; other things
@@ -210,10 +211,50 @@ export class DoomSim {
     return mobj;
   }
 
+  /** picked-up items awaiting deathmatch respawn */
+  private itemRespawnQueue: { spawn: MapThingSpawn; time: number }[] = [];
+
   removeMobj(mobj: Mobj): void {
-    // (item respawn queue omitted: only used by -altdeath item respawn)
+    // deathmatch item respawn (altdeath-style: weapons/items return 30s
+    // after pickup with a fog + sound; invuln/invis excluded per vanilla)
+    if (
+      this.deathmatch &&
+      mobj.flags & MF.SPECIAL &&
+      !(mobj.flags & MF.DROPPED) &&
+      mobj.type !== MT.INV &&
+      mobj.type !== MT.INS &&
+      mobj.spawnpoint &&
+      this.itemRespawnQueue.length < 128
+    ) {
+      this.itemRespawnQueue.push({ spawn: mobj.spawnpoint, time: this.leveltime });
+    }
     unsetThingPosition(this.world, mobj);
     mobj.removed = true; // unlinked from thinker list lazily in runTic
+  }
+
+  /** P_RespawnSpecials: one item per pass, 30 seconds after pickup. */
+  private respawnSpecials(): void {
+    if (!this.deathmatch) return;
+    const head = this.itemRespawnQueue[0];
+    if (!head) return;
+    if (this.leveltime - head.time < 30 * 35) return;
+    this.itemRespawnQueue.shift();
+
+    const x = head.spawn.x << FRACBITS;
+    const y = head.spawn.y << FRACBITS;
+    const ss = pointInSubsector(this.world, x, y);
+    const fog = this.spawnMobj(x, y, ss.sector.floorheight, MT.IFOG);
+    this.startSoundNum(fog, SFX.itmbk);
+
+    let i = 0;
+    for (; i < mobjinfo.length; i++) {
+      if (head.spawn.type === mobjinfo[i]!.doomednum) break;
+    }
+    if (i === mobjinfo.length) return;
+    const z = mobjinfo[i]!.flags & MF.SPAWNCEILING ? ONCEILINGZ : ONFLOORZ;
+    const mo = this.spawnMobj(x, y, z, i);
+    mo.spawnpoint = { ...head.spawn };
+    mo.angle = ANG45 * ((head.spawn.angle / 45) | 0);
   }
 
   explodeMissile(mo: Mobj): void {
@@ -473,6 +514,7 @@ export class DoomSim {
     this.thinkers.run();
 
     this.updateSpecials();
+    this.respawnSpecials();
     this.leveltime++;
   }
 
