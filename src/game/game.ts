@@ -29,6 +29,7 @@ import type { DoomSim } from '../sim/sim.ts';
 import { textureHeights } from '../sim/specials/floors.ts';
 import { PlayerState } from '../sim/defs.ts';
 import { emptyCmd } from '../sim/ticcmd.ts';
+import { loadWadBuffer } from '../wad/load.ts';
 import { listMaps, readMap, type MapData } from '../wad/maps.ts';
 import { hashWad, WadFile } from '../wad/wad.ts';
 
@@ -79,12 +80,7 @@ export interface NetOptions {
 }
 
 export async function runGame(root: HTMLElement, startMap: number, net?: NetOptions): Promise<void> {
-  const resp = await fetch('/DOOM2.WAD');
-  if (!resp.ok) {
-    root.textContent = 'DOOM2.WAD not found — place it in the project root.';
-    return;
-  }
-  const wadBuffer = await resp.arrayBuffer();
+  const wadBuffer = await loadWadBuffer(root);
   const wad = new WadFile(wadBuffer);
   const maps = listMaps(wad);
   const store = new TextureStore(wad);

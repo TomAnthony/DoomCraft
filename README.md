@@ -55,8 +55,13 @@ the server warns on startup if that build is older than `src/`.)
 
 Direct URLs still work: `/?map=7` (solo), `/?host&map=7`, `/?room=CODE`.
 
-The host machine needs `DOOM2.WAD` in the project root; the server
-serves it to both browsers (so a friend needs nothing installed). For
+If `DOOM2.WAD` is in the project root (next to `dist/`), the server
+serves it to both browsers — zero friction, but anyone with the URL
+can download it. To keep the WAD off the server entirely, simply don't
+upload it: players are then prompted to select their own local copy
+(validated, cached in the browser's IndexedDB — one-time per browser,
+never uploaded). The lobby hash check still requires both players'
+WADs to be identical. For
 internet play, run it on a VPS or port-forward 8666. Behind TLS/a
 reverse proxy, the ws URL is derived automatically (wss on https).
 
