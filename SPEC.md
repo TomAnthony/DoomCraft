@@ -13,7 +13,8 @@ describes. Sections marked *(planned)* are specified but not yet implemented.
   a cleared level stays clear; a dead player respawns at a player start with
   pistol + fists + block gun, without resetting the level.
 - **No single-player mode**, no menus/options/automap/savegames/demos-as-a-feature.
-- **Levels**: MAP01–MAP30 from the user's own `DOOM2.WAD`, which is the source
+- **Levels**: all 32 maps (MAP01–MAP30 + secret MAP31/MAP32, reached via
+  secret exits: 15→31, 31→32, 32→16) from the user's own `DOOM2.WAD`, which is the source
   of truth for geometry, textures, sprites, sounds, and thing placement. The
   WAD is never committed, bundled, served publicly, or transmitted between
   players — each player supplies their own local copy, verified identical by
