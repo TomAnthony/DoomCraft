@@ -40,9 +40,11 @@ source release. Game data (`DOOM2.WAD`) is not included.
 One machine hosts everything on a single port:
 
 ```sh
-npm run build       # once, or after pulling changes
-npm run server      # serves the game, the WAD, and the relay on :8666
+npm start           # builds then serves game + WAD + relay on :8666
 ```
+
+(`npm run server` alone serves the existing `dist/` without rebuilding —
+the server warns on startup if that build is older than `src/`.)
 
 1. Both players open `http://<host>:8666/` — a start menu offers
    SOLO GAME, HOST MULTIPLAYER (with a map picker), and JOIN GAME.

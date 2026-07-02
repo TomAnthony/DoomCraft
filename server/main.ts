@@ -128,6 +128,33 @@ wss.on('connection', (ws) => {
   });
 });
 
+// Stale-build tripwire: serving an old dist/ silently runs old netcode.
+async function warnIfStale(): Promise<void> {
+  const { stat, readdir } = await import('node:fs/promises');
+  try {
+    const distTime = (await stat(join(DIST, 'index.html'))).mtimeMs;
+    const srcDir = join(DIST, '..', 'src');
+    let newest = 0;
+    const walk = async (dir: string): Promise<void> => {
+      for (const e of await readdir(dir, { withFileTypes: true })) {
+        const p = join(dir, e.name);
+        if (e.isDirectory()) await walk(p);
+        else newest = Math.max(newest, (await stat(p)).mtimeMs);
+      }
+    };
+    await walk(srcDir);
+    if (newest > distTime) {
+      console.warn(
+        '\n*** dist/ is OLDER than src/ — you are serving a stale build! ***' +
+          '\n*** run `npm run build` (or use `npm start`)                 ***\n',
+      );
+    }
+  } catch {
+    // no dist yet — the 404 handler already explains
+  }
+}
+
 http.listen(PORT, () => {
   console.log(`DoomCraft server on http://localhost:${PORT} (ws same port)`);
+  void warnIfStale();
 });

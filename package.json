@@ -14,7 +14,8 @@
     "lint": "eslint src server tools",
     "typecheck": "tsc --noEmit",
     "gen": "node --experimental-strip-types tools/gen-tables.ts && node --experimental-strip-types tools/gen-info.ts",
-    "server": "node --experimental-strip-types server/main.ts"
+    "server": "node --experimental-strip-types server/main.ts",
+    "start": "npm run build && npm run server"
   },
   "dependencies": {
     "earcut": "^3.0.1",
