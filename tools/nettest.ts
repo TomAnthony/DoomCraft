@@ -52,8 +52,8 @@ for (const [name, page] of [['A', pageA], ['B', pageB]] as const) {
   const text = await page.evaluate(() => document.body.textContent ?? '');
   if (text.includes('DESYNC')) errors.push(`${name}: DESYNC detected!`);
   if (text.includes('PEER DISCONNECTED')) errors.push(`${name}: peer disconnected`);
-  const hudMatch = /HEALTH (\d+)%.*AMMO (\S+)/.exec(text);
-  console.log(`${name}: hud = ${hudMatch ? hudMatch[0] : 'MISSING'}`);
+  const where = await page.evaluate(() => (window as { __dc?: { where(): unknown } }).__dc?.where());
+  console.log(`${name}:`, JSON.stringify(where));
 }
 
 await browser.close();
