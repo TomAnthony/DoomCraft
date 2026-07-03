@@ -18,7 +18,7 @@ export function showStartMenu(root: HTMLElement): void {
   menu.innerHTML = `
     <div style="text-align:center;min-width:340px">
       <div style="color:#e33;font:bold 52px monospace;text-shadow:3px 3px 0 #500;margin-bottom:6px">DOOMCRAFT</div>
-      <div style="color:#a66;font:13px monospace;margin-bottom:34px">DOOM II &times; MINECRAFT &mdash; 2-PLAYER DEATHMATCH WITH MONSTERS</div>
+      <div style="color:#a66;font:13px monospace;margin-bottom:34px">DOOM II &times; MINECRAFT &mdash; 2-4 PLAYER DEATHMATCH WITH MONSTERS</div>
 
       <div style="margin-bottom:10px">
         <label style="color:#e88;font:bold 13px monospace;margin-right:8px">MAP</label>
@@ -86,7 +86,8 @@ export function showStartMenu(root: HTMLElement): void {
       }
     };
     if (await served('DOOM2.WAD')) addOpt('builtin:DOOM2.WAD', 'DOOM2.WAD');
-    if (await served('freedm.wad')) addOpt('builtin:freedm.wad', 'FREEDM (free)');
+    if (await served('freedm.wad')) addOpt('builtin:freedm.wad', 'FREEDM (free, deathmatch)');
+    if (await served('freedoom2.wad')) addOpt('builtin:freedoom2.wad', 'FREEDOOM (free, monsters)');
     for (const w of await listCachedWads()) {
       addOpt(`idb:${w.hash}`, `${w.name.toUpperCase()} (saved)`);
     }

@@ -49,6 +49,8 @@ interface Room {
   players: (WebSocket | null)[]; // slot 0 = creator/host
   ready: boolean[]; // WAD hash verified per slot
   started: boolean;
+  /** highest cmd tic relayed per slot (arbitrates dropout tic) */
+  lastTic: number[];
 }
 
 const rooms = new Map<string, Room>();
@@ -106,8 +108,9 @@ const http = createServer(async (req, res) => {
     if (path === '/' || path.includes('..')) path = '/index.html';
     if (path === '/play') path = '/play.html'; // game launch screen
     let file: Buffer;
-    if (path === '/freedm.wad') {
-      file = await readFile(join(ROOT, 'freedm.wad'));
+    if (path === '/freedm.wad' || path === '/freedoom2.wad') {
+      // freely-distributable Freedoom IWADs, served from the project root
+      file = await readFile(join(ROOT, path.slice(1)));
     } else if (path.startsWith('/wad/')) {
       const target = servedWads.get(path.slice(5));
       if (!target) throw new Error('unregistered wad');
@@ -165,6 +168,12 @@ wss.on('connection', (ws) => {
       if (type === 3 || type === 4) {
         sendTo(room.players[buf[1]!] ?? null, data);
       } else {
+        // track the sender's newest cmd tic — it arbitrates the exact
+        // tic at which survivors drop a leaver (lockstep must agree)
+        if (type === 1 && buf.length >= 6) {
+          const tic = buf.readUInt32LE(2);
+          if (tic > room.lastTic[slot]!) room.lastTic[slot] = tic;
+        }
         for (let i = 0; i < room.players.length; i++) {
           if (i !== slot) sendTo(room.players[i]!, data);
         }
@@ -202,6 +211,7 @@ wss.on('connection', (ws) => {
         players: [ws, null, null, null],
         ready: [true, false, false, false],
         started: false,
+        lastTic: [-1, -1, -1, -1],
       };
       slot = 0;
       rooms.set(room.code, room);
@@ -261,8 +271,22 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     if (!room) return;
-    if (room.started || slot === 0) {
-      // in-game leave (or host bailing pre-start) ends the room
+    if (room.started) {
+      // in-game leave: survivors drop the player at an agreed tic and
+      // keep playing (the first tic for which no cmd was relayed)
+      room.players[slot] = null;
+      const dropTic = room.lastTic[slot]! + 1;
+      let remaining = 0;
+      for (const p of room.players) {
+        if (p && p.readyState === WebSocket.OPEN) {
+          remaining++;
+          p.send(JSON.stringify({ t: 'playerLeft', slot, tic: dropTic }));
+        }
+      }
+      console.log(`room ${room.code}: slot ${slot} left in-game (drop tic ${dropTic}, ${remaining} remain)`);
+      if (remaining === 0) rooms.delete(room.code);
+    } else if (slot === 0) {
+      // host bailing pre-start ends the room
       for (const p of room.players) {
         if (p && p !== ws && p.readyState === WebSocket.OPEN) {
           p.send(JSON.stringify({ t: 'peerleft' }));

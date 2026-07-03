@@ -147,6 +147,22 @@ export class DoomSim {
   }
 
   /**
+   * A player left the netgame: remove them from the world. MUST be
+   * called at the same tic on every peer (the server arbitrates it) —
+   * it is part of the deterministic input sequence.
+   */
+  dropPlayer(playernum: number): void {
+    if (!this.playeringame[playernum]) return;
+    this.playeringame[playernum] = false;
+    const p = this.players[playernum]!;
+    if (p.mo) {
+      this.removeMobj(p.mo);
+      p.mo = null;
+    }
+    p.playerstate = PlayerState.Reborn;
+  }
+
+  /**
    * Reset to the page-load state so the full cmd log can be replayed
    * from game start (desync recovery / rejoin). Determinism makes the
    * log a complete serialization of the game.

@@ -278,6 +278,26 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
 
   const hud = new HudView(store, wad, root);
   const automap = new Automap(root);
+
+  // transient top-center announcements (player left, etc.)
+  const toasts = document.createElement('div');
+  toasts.style.cssText =
+    'position:fixed;top:12%;left:50%;transform:translateX(-50%);text-align:center;' +
+    'pointer-events:none;z-index:5';
+  root.appendChild(toasts);
+  function toast(text: string): void {
+    const el = document.createElement('div');
+    el.textContent = text;
+    el.style.cssText =
+      'color:#e33;font:bold 22px monospace;text-shadow:2px 2px 0 #000;margin-bottom:6px;' +
+      'transition:opacity 1s';
+    toasts.appendChild(el);
+    setTimeout(() => (el.style.opacity = '0'), 3200);
+    setTimeout(() => el.remove(), 4300);
+  }
+  if (netClient) {
+    netClient.onPlayerLeft = (slot) => toast(`PLAYER ${slot + 1} LEFT THE GAME`);
+  }
   document.addEventListener('keydown', (e) => {
     if (e.code === 'Tab') {
       e.preventDefault(); // keep focus in the game
@@ -451,9 +471,15 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
     const t0 = performance.now();
 
     sim.resetForReplay();
+    // departed players were present from the start; they drop again at
+    // their recorded tic during the replay
+    for (let i = 0; i < netClient.playerCount; i++) sim.playeringame[i] = true;
     let map = initialMap;
     loadLevelSim(map);
     for (let t = 0; t < total; t++) {
+      for (const [slot, dropTic] of netClient.departures) {
+        if (dropTic === t) sim.dropPlayer(slot);
+      }
       if (sim.exitPending) {
         const secret = sim.exitPending === 'secret';
         finishLevel(sim);

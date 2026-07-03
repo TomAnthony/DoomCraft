@@ -43,6 +43,7 @@ export default defineConfig({
         });
         server.middlewares.use('/DOOM2.WAD', (_req, res) => void serveWad('DOOM2.WAD', res));
         server.middlewares.use('/freedm.wad', (_req, res) => void serveWad('freedm.wad', res));
+        server.middlewares.use('/freedoom2.wad', (_req, res) => void serveWad('freedoom2.wad', res));
         server.middlewares.use('/wad', (req, res) =>
           void serveWad(decodeURIComponent((req.url ?? '/').slice(1)), res),
         );

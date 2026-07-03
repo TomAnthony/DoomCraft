@@ -31,10 +31,6 @@ removed) as they land; anything sizeable also gets a SPEC.md update.
       DataChannel mesh with per-link demotion would cut relay traffic
       and latency; the tic-keyed dedup already tolerates mixed paths,
       and checksum majority-voting could pinpoint which client diverged.
-- [ ] **Player drop-out continuation** — a player leaving mid-game ends
-      it for everyone (lockstep needs all cmds). Vanilla-style dropout
-      (mark playeringame false at an agreed tic) would let 3 survivors
-      keep playing.
 
 ## Gameplay / polish
 

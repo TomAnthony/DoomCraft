@@ -76,7 +76,12 @@ the server warns on startup if that build is older than `src/`.)
    button) or the 4-letter room code to 1-3 friends.
 3. Friends paste the link, or type the code into JOIN GAME.
 4. The host's lobby shows the roster; START GAME begins the match once
-   2-4 players are in (and any WAD transfers have finished).
+   2-4 players are in (and any WAD transfers have finished). Players
+   leaving mid-game are dropped cleanly; the survivors keep playing.
+
+The server also serves `freedoom2.wad` (Freedoom's single-player IWAD,
+with monsters) from the project root if you place it there — it then
+appears in the menu's GAME DATA selector.
 
 Direct URLs: `/play?map=7` (solo), `/play?host&map=7`, `/play?room=CODE`.
 

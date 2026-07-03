@@ -132,7 +132,12 @@ player positions *(planned)*.
   delay (`INPUT_DELAY` in `src/net/client.ts`; adaptive delay is future
   work). All 2-4 clients run identical sims; only inputs are exchanged.
   The host opens a room, joiners accumulate (roster shown live), and the
-  host starts the game explicitly once 2-4 players are ready.
+  host starts the game explicitly once 2-4 players are ready. A player
+  leaving mid-game does NOT end it: the server arbitrates the exact drop
+  tic (first tic with no relayed cmd from them) and every survivor calls
+  dropPlayer at that tic — removing the marine deterministically — while
+  play continues (a toast announces the departure). Replay-based resync
+  re-applies departures at their recorded tics.
 - **Wire format**: binary frames `[u8 type][u8 slot][payload]` — the slot
   byte is the SENDER for cmd/checksum frames (server broadcasts to all
   other peers) and the TARGET for WAD frames (server routes to one peer).

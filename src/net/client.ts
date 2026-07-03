@@ -76,6 +76,10 @@ export class NetClient {
   sendTic = 0;
   desync: number | null = null;
   peerLeft = false;
+  /** slot -> first tic WITHOUT that player's cmd (server-arbitrated) */
+  readonly departures = new Map<number, number>();
+  /** UI callback: a player left mid-game */
+  onPlayerLeft: ((slot: number) => void) | null = null;
 
   private wadIncoming: { buf: Uint8Array; got: number } | null = null;
   private receivedWad: ArrayBuffer | null = null;
@@ -137,6 +141,17 @@ export class NetClient {
           void this.onRtcSignal(msg.d, msg.from ?? 0);
         } else if (msg.t === 'error') {
           reject(new Error(msg.reason));
+        } else if (msg.t === 'playerLeft') {
+          // dropout-and-continue: survivors drop the player at the
+          // agreed tic (clamped forward if we already simulated past it
+          // via the RTC fast path — only possible with no peers left to
+          // disagree with)
+          this.departures.set(msg.slot, Math.max(msg.tic, this.simTic));
+          this.onPlayerLeft?.(msg.slot);
+          if (msg.slot === (this.slot ^ 1) && this.playerCount === 2) {
+            // our RTC partner is gone; make sure we're relay-only
+            this.demotePath('peer left', true);
+          }
         } else if (msg.t === 'peerleft') {
           this.peerLeft = true;
         }
@@ -492,6 +507,9 @@ export class NetClient {
 
   private allHave(tic: number): boolean {
     for (let i = 0; i < this.playerCount; i++) {
+      const gone = this.departures.get(i);
+      if (gone !== undefined && tic >= gone) continue; // departed: no cmd needed
+      if (i === this.slot && tic < this.sendTic) continue; // our own cmds always exist
       if (!this.cmds[i]!.has(tic)) return false;
     }
     return true;
@@ -514,6 +532,11 @@ export class NetClient {
    *  powers replay-based desync recovery. */
   advance(sim: DoomSim): number {
     const tic = this.simTic;
+    // apply server-arbitrated departures exactly at their tic — part of
+    // the deterministic input sequence, identical on every survivor
+    for (const [slot, dropTic] of this.departures) {
+      if (dropTic === tic) sim.dropPlayer(slot);
+    }
     const cmds: TicCmd[] = [];
     for (let i = 0; i < MAX_NET_PLAYERS; i++) {
       cmds.push(i < this.playerCount ? (this.cmds[i]!.get(tic) ?? emptyCmd()) : emptyCmd());
@@ -539,7 +562,7 @@ export class NetClient {
 
   private compareChecksums(): void {
     for (let s = 0; s < this.playerCount; s++) {
-      if (s === this.slot) continue;
+      if (s === this.slot || this.departures.has(s)) continue;
       for (const [tic, remote] of this.remoteChecksums[s]!) {
         const local = this.localChecksums.get(tic);
         if (local === undefined) continue;
