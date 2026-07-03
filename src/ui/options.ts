@@ -10,6 +10,7 @@ interface Saved {
   music: number;
   sfx: number;
   sensitivity: number;
+  gamma: number;
   aspect43: boolean;
   hires: boolean;
   nameTags: boolean;
@@ -20,14 +21,17 @@ function load(): Saved {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       return {
-        music: 0.5, sfx: 0.6, sensitivity: 1, aspect43: true, hires: false, nameTags: true,
+        music: 0.5, sfx: 0.6, sensitivity: 1, gamma: 1, aspect43: true, hires: false,
+        nameTags: true,
         ...JSON.parse(raw),
       };
     }
   } catch {
     // ignore
   }
-  return { music: 0.5, sfx: 0.6, sensitivity: 1, aspect43: true, hires: false, nameTags: true };
+  return {
+    music: 0.5, sfx: 0.6, sensitivity: 1, gamma: 1, aspect43: true, hires: false, nameTags: true,
+  };
 }
 
 export class OptionsMenu {
@@ -42,6 +46,7 @@ export class OptionsMenu {
     onAspect?: (locked: boolean) => void,
     onHires?: (hires: boolean) => void,
     onNameTags?: (show: boolean) => void,
+    onGamma?: (gamma: number) => void,
   ) {
     const saved = load();
     audio.setMusicVolume(saved.music);
@@ -50,6 +55,7 @@ export class OptionsMenu {
     onAspect?.(saved.aspect43);
     onHires?.(saved.hires);
     onNameTags?.(saved.nameTags);
+    onGamma?.(saved.gamma);
 
     this.panel = document.createElement('div');
     this.panel.style.cssText =
@@ -69,6 +75,10 @@ export class OptionsMenu {
         <label style="display:block;margin-bottom:16px">
           <span style="display:block;margin-bottom:4px;color:#e88">MOUSE SENSITIVITY</span>
           <input id="opt-sens" type="range" min="10" max="300" style="width:100%">
+        </label>
+        <label style="display:block;margin-bottom:16px">
+          <span style="display:block;margin-bottom:4px;color:#e88">GAMMA (BRIGHTNESS)</span>
+          <input id="opt-gamma" type="range" min="100" max="220" style="width:100%">
         </label>
         <label style="display:block;margin-bottom:12px;cursor:pointer">
           <input id="opt-aspect" type="checkbox" style="margin-right:8px">
@@ -90,12 +100,14 @@ export class OptionsMenu {
     const music = this.panel.querySelector('#opt-music') as HTMLInputElement;
     const sfx = this.panel.querySelector('#opt-sfx') as HTMLInputElement;
     const sens = this.panel.querySelector('#opt-sens') as HTMLInputElement;
+    const gamma = this.panel.querySelector('#opt-gamma') as HTMLInputElement;
     const aspect = this.panel.querySelector('#opt-aspect') as HTMLInputElement;
     const hires = this.panel.querySelector('#opt-hires') as HTMLInputElement;
     const nametags = this.panel.querySelector('#opt-nametags') as HTMLInputElement;
     music.value = String(Math.round(saved.music * 100));
     sfx.value = String(Math.round(saved.sfx * 100));
     sens.value = String(Math.round(saved.sensitivity * 100));
+    gamma.value = String(Math.round(saved.gamma * 100));
     aspect.checked = saved.aspect43;
     hires.checked = saved.hires;
     nametags.checked = saved.nameTags;
@@ -108,6 +120,7 @@ export class OptionsMenu {
             music: Number(music.value) / 100,
             sfx: Number(sfx.value) / 100,
             sensitivity: Number(sens.value) / 100,
+            gamma: Number(gamma.value) / 100,
             aspect43: aspect.checked,
             hires: hires.checked,
             nameTags: nametags.checked,
@@ -127,6 +140,10 @@ export class OptionsMenu {
     });
     sens.addEventListener('input', () => {
       input.sensitivity = Number(sens.value) / 100;
+      persist();
+    });
+    gamma.addEventListener('input', () => {
+      onGamma?.(Number(gamma.value) / 100);
       persist();
     });
     aspect.addEventListener('change', () => {

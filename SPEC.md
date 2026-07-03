@@ -57,7 +57,7 @@ player positions *(planned)*.
 | --- | --- |
 | Mouse X / Y (pointer lock) | Turn / look up-down |
 | Arrow keys | Keyboard turn / look |
-| Esc | Options menu (music/sound volume; Esc releases the mouse, clicking or Resume re-captures) |
+| Esc | Options menu (music/sound/gamma/sensitivity/aspect/hi-res/name tags; Esc releases the mouse, clicking or Resume re-captures) |
 | W / S | Forward / back |
 | A / D | Strafe left / right |
 | Left click | Fire (block gun: place block) |
@@ -123,12 +123,13 @@ player positions *(planned)*.
   grind the block down (10 damage every 4th tic, vanilla crush cadence)
   and proceed once it's destroyed. Rising floors ignore blocks —
   interpenetration is by design.
-- **Jump/climb nuance**: the jump apex is ~36 map units, so a +32 rise
-  between block tops is always jumpable, but a grid-aligned block whose
-  top sits more than ~36 above a misaligned sector floor is not directly
-  jumpable — place a partially-buried block first and stair-step (this is
-  also how you pillar up). Blocks may interpenetrate world geometry by
-  design.
+- **Jump/climb nuance**: blocks follow native stair rules — a block
+  whose top is within the vanilla 24-unit step range of your feet is
+  climbed automatically, no jump (a 32-block on flat ground still needs
+  the jump; a 2-stack is a wall because the upper block lowers the
+  ceiling onto the lower's top). The jump apex is ~36 map units, so a
+  +32 rise between block tops is always jumpable. Blocks may
+  interpenetrate world geometry by design.
 - **Implementation map**: grid + DDA in `src/blocks/grid.ts`, gun states
   and place/remove in `src/blocks/gun.ts` (psprite states appended after
   the generated table; drawn as a procedural isometric cube in hand), sim wiring in

@@ -401,3 +401,46 @@ describe.skipIf(!wad)('block debris', () => {
     expect(puffs()).toBe(mid);
   });
 });
+
+describe.skipIf(!wad)('block steps', () => {
+  test('a block rising <=24 above the floor is climbed like a stair', () => {
+    const sim = newSim();
+    const p = sim.players[0]!.mo!;
+    // MAP01 start floor is 56; a block in cell z=1 has its top at 64 —
+    // an 8-unit rise, well inside vanilla step range
+    const bx = ((p.x + (48 << 16)) | 0) >> 21;
+    const by = p.y >> 21;
+    sim.blocks.place(bx, by, 1);
+    // walk east into it, no jump — the player steps up onto the block
+    // (and then off the far side, so track the peak)
+    p.angle = 0;
+    let peakZ = 0;
+    for (let t = 0; t < 70; t++) {
+      const cmd = emptyCmd();
+      cmd.forwardmove = 50;
+      sim.runTic([cmd]);
+      peakZ = Math.max(peakZ, p.z);
+    }
+    expect(peakZ / 65536).toBe(64); // stood on the block without jumping
+  });
+
+  test('a full 32-rise block still requires a jump; 2-stacks are walls', () => {
+    const sim = newSim();
+    const p = sim.players[0]!.mo!;
+    // stack two blocks: lower top = 96 (40 above the 56 floor)
+    const bx = ((p.x + (48 << 16)) | 0) >> 21;
+    const by = p.y >> 21;
+    sim.blocks.place(bx, by, 2);
+    sim.blocks.place(bx, by, 3);
+    p.angle = 0;
+    const x0 = p.x;
+    for (let t = 0; t < 70; t++) {
+      const cmd = emptyCmd();
+      cmd.forwardmove = 50;
+      sim.runTic([cmd]);
+    }
+    // blocked well before the block face (radius 16, face at cell edge)
+    expect(p.z / 65536).toBe(56);
+    expect((p.x - x0) / 65536).toBeLessThan(48);
+  });
+});

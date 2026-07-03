@@ -110,7 +110,12 @@ export class BlockGrid {
       if (cell.bx < bx1 || cell.bx > bx2 || cell.by < by1 || cell.by > by2) continue;
       const bottom = cell.bz * BLOCK_FX;
       const top = bottom + BLOCK_FX;
-      if (z >= top) {
+      // A block whose top is within vanilla step range (24) of the
+      // mover's feet is a step, not a wall — same climbing rules as
+      // native stairs. (A 32-unit block with top-z <= 24 is always at
+      // knee height, so it can never be overhead.) Anything higher
+      // lowers the ceiling, which is what keeps 2-stacks unclimbable.
+      if (top - z <= 24 * (BLOCK_FX / BLOCK_UNITS)) {
         if (top > floorz) floorz = top;
       } else if (bottom < ceilingz) {
         ceilingz = bottom;

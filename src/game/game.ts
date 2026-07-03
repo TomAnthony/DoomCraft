@@ -316,6 +316,33 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
   window.addEventListener('resize', applySize);
 
   let nameTagsEnabled = true;
+  // Gamma via an SVG feComponentTransfer filter on the game canvas —
+  // true power-curve gamma (like vanilla's gamma tables), covers world
+  // and HUD, GPU-composited, no shader changes.
+  function applyGamma(gamma: number): void {
+    let svg: Element | null = document.getElementById('dc-gamma-svg');
+    if (!svg) {
+      const el = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      el.id = 'dc-gamma-svg';
+      el.setAttribute('width', '0');
+      el.setAttribute('height', '0');
+      el.style.position = 'absolute';
+      el.innerHTML =
+        '<filter id="dc-gamma"><feComponentTransfer>' +
+        '<feFuncR type="gamma" amplitude="1" exponent="1" offset="0"/>' +
+        '<feFuncG type="gamma" amplitude="1" exponent="1" offset="0"/>' +
+        '<feFuncB type="gamma" amplitude="1" exponent="1" offset="0"/>' +
+        '</feComponentTransfer></filter>';
+      document.body.appendChild(el);
+      svg = el;
+    }
+    const exp = String(1 / Math.max(1, Math.min(2.2, gamma)));
+    for (const fn of svg.querySelectorAll('feFuncR, feFuncG, feFuncB')) {
+      fn.setAttribute('exponent', exp);
+    }
+    canvas.style.filter = gamma > 1.001 ? 'url(#dc-gamma)' : '';
+  }
+
   const input = new InputHandler();
   input.attach(renderer.domElement);
   renderer.domElement.addEventListener('click', () => audio.resume());
@@ -341,6 +368,7 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
     (show) => {
       nameTagsEnabled = show;
     },
+    (gamma) => applyGamma(gamma),
   );
   // Esc exits pointer lock; that's the options key. Only after the game
   // was actually captured once (not on the initial click-to-play screen).
