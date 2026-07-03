@@ -30,6 +30,29 @@ npm test
 `reference/chocolate-doom` (`git clone --depth 1
 https://github.com/chocolate-doom/chocolate-doom.git reference/chocolate-doom`).
 
+## Credits & provenance
+
+- **id Software's Doom** (GPL-2) — the gameplay simulation is a
+  statement-level TypeScript port of the original Doom source, via the
+  **[Chocolate Doom](https://github.com/chocolate-doom/chocolate-doom)**
+  tree (GPL-2); the state/mobj/sound tables and math tables in
+  `src/sim/data/` are code-generated directly from its C source.
+- **[Freedoom / FreeDM](https://freedoom.github.io/)** (BSD-style) —
+  `freedm.wad`, the freely-distributable default game data.
+- **[Three.js](https://threejs.org/)** (MIT) — 3D rendering.
+- **[earcut](https://github.com/mapbox/earcut)** (ISC) — sector polygon
+  triangulation.
+- **[ws](https://github.com/websockets/ws)** (MIT) — relay server
+  WebSockets.
+- Dev tooling: Vite (MIT), TypeScript (Apache-2.0), Vitest (MIT),
+  ESLint (MIT), Playwright (Apache-2.0).
+- Consulted (no code derived): wad-js (WAD format reference), the
+  doom-webxr write-up (WAD→3D geometry approach). Doom.js-v2 was
+  evaluated early and not used (unlicensed).
+
+DOOM2.WAD is commercial id Software data: it is never committed,
+bundled, or served except when explicitly registered by the operator.
+
 ## License
 
 GPL-2.0-only. Contains code ported from Chocolate Doom / the original Doom
