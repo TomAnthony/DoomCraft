@@ -87,9 +87,11 @@ export class NetClient {
             receivedWad: this.receivedWad ?? undefined,
           });
         } else if (msg.t === 'peerNeedsWad') {
-          if (opts.wadProvider) void this.sendWad(opts.wadProvider());
+          if (opts.wadProvider) void this.transferWad(opts.wadProvider());
         } else if (msg.t === 'awaitWad') {
           this.onWadProgress?.(0, 0); // "waiting for host…"
+        } else if (msg.t === 'rtc') {
+          void this.onRtcSignal(msg.d);
         } else if (msg.t === 'error') {
           reject(new Error(msg.reason));
         } else if (msg.t === 'peerleft') {
@@ -99,7 +101,136 @@ export class NetClient {
     });
   }
 
-  /** Host side: stream the WAD to the joiner through the relay. */
+  // --- WAD transfer ---------------------------------------------------------
+  // Preferred path: a direct WebRTC DataChannel (host→joiner, peer to
+  // peer — the 14-22MB never touches the relay; the server only forwards
+  // the few hundred bytes of SDP/ICE signalling). Falls back to relaying
+  // through the WebSocket when a direct connection can't be established
+  // (e.g. symmetric NATs) within the timeout.
+
+  private rtcPc: RTCPeerConnection | null = null;
+  private pendingCands: RTCIceCandidateInit[] = [];
+
+  /** Host side: try direct WebRTC, fall back to the relay. */
+  private async transferWad(buf: ArrayBuffer): Promise<void> {
+    const viaRtc = await this.tryRtcSend(buf, 8000);
+    if (!viaRtc) {
+      console.info('WAD transfer: WebRTC unavailable, using relay fallback');
+      await this.sendWad(buf);
+    }
+    this.rtcPc?.close();
+    this.rtcPc = null;
+  }
+
+  private tryRtcSend(buf: ArrayBuffer, timeoutMs: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      let opened = false;
+      try {
+        const pc = new RTCPeerConnection({
+          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+        });
+        this.rtcPc = pc;
+        const dc = pc.createDataChannel('wad');
+        dc.binaryType = 'arraybuffer';
+        const timer = setTimeout(() => {
+          if (!opened) {
+            try {
+              pc.close();
+            } catch {
+              // ignore
+            }
+            resolve(false);
+          }
+        }, timeoutMs);
+        dc.onopen = () => {
+          opened = true;
+          clearTimeout(timer);
+          console.info('WAD transfer: direct WebRTC channel open');
+          this.streamOverChannel(dc, buf).then(
+            () => resolve(true),
+            () => resolve(false), // mid-stream failure → relay resends from scratch
+          );
+        };
+        pc.onicecandidate = (e) => {
+          if (e.candidate) this.ws?.send(JSON.stringify({ t: 'rtc', d: { cand: e.candidate } }));
+        };
+        void pc
+          .createOffer()
+          .then((o) => pc.setLocalDescription(o))
+          .then(() => this.ws?.send(JSON.stringify({ t: 'rtc', d: { sdp: pc.localDescription } })));
+      } catch {
+        resolve(false);
+      }
+    });
+  }
+
+  /** Joiner side: answer the host's offer; channel frames feed the same
+   *  assembler as relay frames. */
+  private async onRtcSignal(d: {
+    sdp?: RTCSessionDescriptionInit;
+    cand?: RTCIceCandidateInit;
+  }): Promise<void> {
+    try {
+      if (d.sdp?.type === 'offer') {
+        const pc = new RTCPeerConnection({
+          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+        });
+        this.rtcPc = pc;
+        pc.ondatachannel = (e) => {
+          e.channel.binaryType = 'arraybuffer';
+          e.channel.onmessage = (ev) => this.onBinary(new DataView(ev.data as ArrayBuffer));
+        };
+        pc.onicecandidate = (e) => {
+          if (e.candidate) this.ws?.send(JSON.stringify({ t: 'rtc', d: { cand: e.candidate } }));
+        };
+        await pc.setRemoteDescription(d.sdp);
+        for (const c of this.pendingCands.splice(0)) {
+          await pc.addIceCandidate(c).catch(() => {});
+        }
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        this.ws?.send(JSON.stringify({ t: 'rtc', d: { sdp: pc.localDescription } }));
+      } else if (d.sdp?.type === 'answer') {
+        await this.rtcPc?.setRemoteDescription(d.sdp);
+        for (const c of this.pendingCands.splice(0)) {
+          await this.rtcPc?.addIceCandidate(c).catch(() => {});
+        }
+      } else if (d.cand) {
+        if (this.rtcPc?.remoteDescription) await this.rtcPc.addIceCandidate(d.cand).catch(() => {});
+        else this.pendingCands.push(d.cand);
+      }
+    } catch {
+      // direct path failed — the host's timeout triggers the relay fallback
+    }
+  }
+
+  /** Stream meta+chunks over a DataChannel (16KB frames, backpressured). */
+  private async streamOverChannel(dc: RTCDataChannel, buf: ArrayBuffer): Promise<void> {
+    const CHUNK = 65536; // all current browsers accept 64KB DataChannel messages
+    const meta = new DataView(new ArrayBuffer(5));
+    meta.setUint8(0, MSG_WAD_META);
+    meta.setUint32(1, buf.byteLength, true);
+    dc.send(meta.buffer);
+    for (let off = 0; off < buf.byteLength; off += CHUNK) {
+      while (dc.bufferedAmount > 4 * 1024 * 1024) {
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      const chunk = buf.slice(off, Math.min(off + CHUNK, buf.byteLength));
+      const frame = new Uint8Array(5 + chunk.byteLength);
+      const view = new DataView(frame.buffer);
+      view.setUint8(0, MSG_WAD_CHUNK);
+      view.setUint32(1, off, true);
+      frame.set(new Uint8Array(chunk), 5);
+      dc.send(frame.buffer);
+    }
+    // drain before the caller closes the connection — anything left in
+    // bufferedAmount would be silently dropped with the tail unsent
+    while (dc.bufferedAmount > 0 && dc.readyState === 'open') {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+  }
+
+  /** Relay fallback: stream the WAD through the WebSocket server. */
   private async sendWad(buf: ArrayBuffer): Promise<void> {
     const ws = this.ws!;
     const meta = new DataView(new ArrayBuffer(5));

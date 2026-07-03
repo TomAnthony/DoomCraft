@@ -98,7 +98,7 @@ const http = createServer(async (req, res) => {
   }
 });
 
-const MAX_ROOMS = 2000;
+const MAX_ROOMS = 500;
 
 // maxPayload: ticcmds are 15B and WAD chunks 256KB+5B — cap frames at
 // 1MB so a hostile client can't buffer huge frames in server memory.
@@ -174,6 +174,11 @@ wss.on('connection', (ws) => {
         ws.send(JSON.stringify({ t: 'awaitWad' }));
         console.log(`room ${r.code}: transferring WAD to joiner`);
       }
+    } else if (msg.t === 'rtc') {
+      // WebRTC signalling for the direct host→joiner WAD transfer:
+      // opaque to the server, just forwarded to the other peer
+      const p = peer();
+      if (p && p.readyState === WebSocket.OPEN) p.send(String(data));
     } else if (msg.t === 'wadReady') {
       if (room && slot === 1) {
         if (msg.wadHash === room.wadHash) {

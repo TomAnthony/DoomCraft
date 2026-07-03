@@ -65,8 +65,9 @@ Direct URLs still work: `/?map=7` (solo), `/?host&map=7`, `/?room=CODE`.
   and cached in IndexedDB — local to your browser).
 - **Host→joiner transfer**: whatever the host plays, the joiner gets.
   If the joiner's WAD hash doesn't match, the host's WAD streams to
-  them through the relay (progress shown), is verified by hash, and is
-  cached for next time. Joiners never need to pick anything.
+  them directly over WebRTC (peer to peer — no server bandwidth), with
+  an automatic relay fallback when a direct connection can't form.
+  Verified by hash, cached for next time; joiners never pick anything.
 - **Private server WADs**: commercial WADs are NOT served unless you
   register them: `npm run server -- --wad DOOM2.WAD:mysecret` serves
   the file only at `/wad/mysecret`, invisible to the menu. Load it with
