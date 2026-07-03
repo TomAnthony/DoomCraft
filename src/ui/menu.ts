@@ -123,7 +123,7 @@ export function showStartMenu(root: HTMLElement): void {
     for (const w of await listCachedWads()) {
       addOpt(`idb:${w.hash}`, `${w.name.toUpperCase()} (saved)`);
     }
-    addOpt('upload', 'UPLOAD A WAD…');
+    addOpt('upload', 'USE LOCAL WAD…');
     const saved = getWadChoice();
     if (saved && [...wadSel.options].some((o) => o.value === saved)) wadSel.value = saved;
     else setWadChoice(wadSel.value);

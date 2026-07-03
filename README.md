@@ -94,8 +94,9 @@ Direct URLs: `/play?map=7` (solo), `/play?host&map=7`, `/play?room=CODE`.
   freedoom2 for solo games and freedm for multiplayer automatically;
   each is also listed individually with a (solo)/(deathmatch) label.
 - **The start menu has a GAME DATA selector**: server-offered WADs,
-  your browser's saved WADs, and UPLOAD A WAD… (uploads are validated
-  and cached in IndexedDB — local to your browser).
+  your browser's saved WADs, and USE LOCAL WAD… (picks are validated
+  and cached in IndexedDB — local to your browser, never sent to the
+  server).
 - **Host→joiner transfer**: whatever the host plays, the joiner gets.
   If the joiner's WAD hash doesn't match, the host's WAD streams to
   them directly over WebRTC (peer to peer — no server bandwidth), with
