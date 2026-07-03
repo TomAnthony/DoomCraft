@@ -21,6 +21,11 @@ export function showStartMenu(root: HTMLElement): void {
       <div style="color:#a66;font:13px monospace;margin-bottom:34px">DOOM II &times; MINECRAFT &mdash; 2-4 PLAYER DEATHMATCH WITH MONSTERS</div>
 
       <div style="margin-bottom:10px">
+        <label style="color:#e88;font:bold 13px monospace;margin-right:8px">NAME</label>
+        <input id="menu-name" maxlength="12" placeholder="Player" style="background:#1a1a1a;
+          color:#ddd;border:1px solid #822;font:bold 14px monospace;padding:4px 8px;width:160px">
+      </div>
+      <div style="margin-bottom:10px">
         <label style="color:#e88;font:bold 13px monospace;margin-right:8px">MAP</label>
         <select id="menu-map" style="background:#1a1a1a;color:#ddd;border:1px solid #822;
           font:bold 14px monospace;padding:4px 8px"></select>
@@ -50,6 +55,20 @@ export function showStartMenu(root: HTMLElement): void {
       </div>
     </div>`;
   root.appendChild(menu);
+
+  const nameInput = menu.querySelector('#menu-name') as HTMLInputElement;
+  try {
+    nameInput.value = localStorage.getItem('doomcraft.playerName') ?? '';
+  } catch {
+    // ignore
+  }
+  nameInput.addEventListener('input', () => {
+    try {
+      localStorage.setItem('doomcraft.playerName', nameInput.value.trim());
+    } catch {
+      // ignore
+    }
+  });
 
   const mapSel = menu.querySelector('#menu-map') as HTMLSelectElement;
   for (let i = 1; i <= 32; i++) {

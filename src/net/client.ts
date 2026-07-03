@@ -46,6 +46,8 @@ export interface LobbyResult {
 export interface ConnectOptions {
   room?: string;
   map?: number;
+  /** display name (max 12 chars; empty = server assigns "Player N") */
+  name?: string;
   /** host rule (create only): allow the block gun */
   blockGun?: boolean;
   /** null = we have no WAD; the host will send one */
@@ -53,8 +55,8 @@ export interface ConnectOptions {
   /** host side: supplies the bytes to stream on peerNeedsWad */
   wadProvider?: () => ArrayBuffer;
   onWadProgress?: (got: number, total: number) => void;
-  /** lobby roster updates: players present / WAD-ready */
-  onRoster?: (count: number, ready: number) => void;
+  /** lobby roster updates: players present / WAD-ready / display names */
+  onRoster?: (count: number, ready: number, names: string[]) => void;
 }
 
 export class NetClient {
@@ -69,6 +71,8 @@ export class NetClient {
   slot = 0;
   /** number of players once the game starts */
   playerCount = 2;
+  /** display names per slot (from the lobby; presentational only) */
+  names: string[] = [];
   room = '';
   /** next tic to simulate */
   simTic = 0;
@@ -95,7 +99,9 @@ export class NetClient {
       ws.onerror = () => reject(new Error(`cannot reach server ${url}`));
       ws.onopen = () => {
         if (opts.room) {
-          ws.send(JSON.stringify({ t: 'join', room: opts.room, wadHash: opts.wadHash }));
+          ws.send(
+            JSON.stringify({ t: 'join', room: opts.room, wadHash: opts.wadHash, name: opts.name }),
+          );
         } else {
           ws.send(
             JSON.stringify({
@@ -103,6 +109,7 @@ export class NetClient {
               map: opts.map ?? 1,
               wadHash: opts.wadHash,
               blockGun: opts.blockGun ?? true,
+              name: opts.name,
             }),
           );
         }
@@ -118,6 +125,7 @@ export class NetClient {
         } else if (msg.t === 'start') {
           this.slot = msg.slot;
           this.playerCount = msg.players ?? 2;
+          this.names = msg.names ?? [];
           // RTC cmd transport is 2-player only for now (3-4 players run
           // relay-first; a per-pair mesh is future work). The host offers
           // the persistent in-game cmd channel.
@@ -136,7 +144,8 @@ export class NetClient {
         } else if (msg.t === 'awaitWad') {
           this.onWadProgress?.(0, 0); // "waiting for host…"
         } else if (msg.t === 'roster') {
-          opts.onRoster?.(msg.count, msg.ready);
+          this.names = msg.names ?? this.names;
+          opts.onRoster?.(msg.count, msg.ready, msg.names ?? []);
         } else if (msg.t === 'rtc') {
           void this.onRtcSignal(msg.d, msg.from ?? 0);
         } else if (msg.t === 'error') {
@@ -574,6 +583,11 @@ export class NetClient {
     for (const tic of this.localChecksums.keys()) {
       if (tic < this.simTic - 35 * 10) this.localChecksums.delete(tic);
     }
+  }
+
+  /** Display name for a slot ("Player N" fallback). */
+  nameOf(slot: number): string {
+    return this.names[slot] || `Player ${slot + 1}`;
   }
 
   /** Host: start the game with the players currently in the room. */

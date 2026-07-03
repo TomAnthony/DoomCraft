@@ -51,14 +51,21 @@ interface Room {
   started: boolean;
   /** highest cmd tic relayed per slot (arbitrates dropout tic) */
   lastTic: number[];
+  names: string[];
 }
 
 const rooms = new Map<string, Room>();
 
+function cleanName(raw: unknown, slot: number): string {
+  const s = String(raw ?? '').replace(/[^\x20-\x7e]/g, '').trim().slice(0, 12);
+  return s || `Player ${slot + 1}`;
+}
+
 function roster(r: Room): void {
   const count = r.players.filter(Boolean).length;
   const ready = r.players.filter((p, i) => p && r.ready[i]).length;
-  const msg = JSON.stringify({ t: 'roster', count, ready });
+  const names = r.players.map((p, i) => (p ? r.names[i]! : ''));
+  const msg = JSON.stringify({ t: 'roster', count, ready, names });
   for (const p of r.players) {
     if (p && p.readyState === WebSocket.OPEN) p.send(msg);
   }
@@ -66,9 +73,20 @@ function roster(r: Room): void {
 
 /** Compact slots (drop pre-start leavers) and start the game. */
 function start(r: Room): void {
-  const live = r.players.filter(Boolean) as WebSocket[];
+  const live: WebSocket[] = [];
+  const liveNames: string[] = [];
+  for (let i = 0; i < r.players.length; i++) {
+    if (r.players[i]) {
+      live.push(r.players[i]!);
+      liveNames.push(r.names[i]!);
+    }
+  }
   r.players = [...live];
-  while (r.players.length < MAX_ROOM_PLAYERS) r.players.push(null);
+  r.names = [...liveNames];
+  while (r.players.length < MAX_ROOM_PLAYERS) {
+    r.players.push(null);
+    r.names.push('');
+  }
   r.started = true;
   for (let i = 0; i < live.length; i++) {
     live[i]!.send(
@@ -79,10 +97,11 @@ function start(r: Room): void {
         slot: i,
         players: live.length,
         blockGun: r.blockGun,
+        names: liveNames,
       }),
     );
   }
-  console.log(`room ${r.code} started with ${live.length} players`);
+  console.log(`room ${r.code} started with ${live.length} players (${liveNames.join(', ')})`);
 }
 
 function makeCode(): string {
@@ -193,6 +212,7 @@ wss.on('connection', (ws) => {
       blockGun?: boolean;
       to?: number;
       from?: number;
+      name?: string;
       d?: unknown;
     };
     try {
@@ -216,6 +236,7 @@ wss.on('connection', (ws) => {
         ready: [true, false, false, false],
         started: false,
         lastTic: [-1, -1, -1, -1],
+        names: [cleanName(msg.name, 0), '', '', ''],
       };
       slot = 0;
       rooms.set(room.code, room);
@@ -235,6 +256,7 @@ wss.on('connection', (ws) => {
       }
       r.players[free] = ws;
       r.ready[free] = msg.wadHash === r.wadHash;
+      r.names[free] = cleanName(msg.name, free);
       room = r;
       slot = free;
       ws.send(JSON.stringify({ t: 'joined', slot: free }));
@@ -301,6 +323,7 @@ wss.on('connection', (ws) => {
       // pre-start joiner leave: free the slot
       room.players[slot] = null;
       room.ready[slot] = false;
+      room.names[slot] = '';
       roster(room);
     }
   });

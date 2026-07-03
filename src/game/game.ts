@@ -99,6 +99,12 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
     root.appendChild(status);
 
     netClient = new NetClient();
+    let playerName = '';
+    try {
+      playerName = (localStorage.getItem('doomcraft.playerName') ?? '').trim().slice(0, 12);
+    } catch {
+      // ignore
+    }
     const hash = wadBuffer ? await hashWad(wadBuffer) : null;
     try {
       // Host lobby: room code, invite link, roster, and a START button
@@ -108,10 +114,12 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
       let shownRoom = '';
       let rosterLine: HTMLElement | null = null;
       let startBtn: HTMLButtonElement | null = null;
-      let lastRoster = { count: 1, ready: 1 };
+      let lastRoster = { count: 1, ready: 1, names: [] as string[] };
       const updateRosterUi = () => {
         if (rosterLine) {
-          rosterLine.textContent = `${lastRoster.count} / 4 players in the room` +
+          const who = lastRoster.names.filter(Boolean).join(', ');
+          rosterLine.textContent = `${lastRoster.count} / 4 players` +
+            (who ? `: ${who}` : '') +
             (lastRoster.ready < lastRoster.count ? ` (${lastRoster.count - lastRoster.ready} receiving WAD…)` : '');
         }
         if (startBtn) {
@@ -167,10 +175,11 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
         room: net.room,
         map: startMap,
         blockGun: net.blockGun,
+        name: playerName,
         wadHash: hash,
         wadProvider: () => wadBuffer!,
-        onRoster: (count, ready) => {
-          lastRoster = { count, ready };
+        onRoster: (count, ready, names) => {
+          lastRoster = { count, ready, names };
           updateRosterUi();
         },
         onWadProgress: (got, total) => {
@@ -296,8 +305,10 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
     setTimeout(() => el.remove(), 4300);
   }
   if (netClient) {
-    netClient.onPlayerLeft = (slot) => toast(`PLAYER ${slot + 1} LEFT THE GAME`);
+    netClient.onPlayerLeft = (slot) => toast(`${netClient!.nameOf(slot).toUpperCase()} LEFT THE GAME`);
   }
+  const playerLabel = (slot: number): string =>
+    netClient ? netClient.nameOf(slot).toUpperCase() : `PLAYER ${slot + 1}`;
   document.addEventListener('keydown', (e) => {
     if (e.code === 'Tab') {
       e.preventDefault(); // keep focus in the game
@@ -524,6 +535,18 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
   // Runs after every simulated tic (solo and net take the same path).
   let intermission = 0;
   function postTic(): void {
+    // kill feed (presentational; names never enter the sim)
+    for (const f of sim.fragEvents) {
+      if (netClient) {
+        toast(
+          f.killer === null
+            ? `${playerLabel(f.victim)} DIED`
+            : f.killer === f.victim
+              ? `${playerLabel(f.victim)} FRAGGED THEMSELVES`
+              : `${playerLabel(f.killer)} FRAGGED ${playerLabel(f.victim)}`,
+        );
+      }
+    }
     sprites!.snapshot(sim, localPlayer().mo);
     snapshotSectors();
     snapshotView();

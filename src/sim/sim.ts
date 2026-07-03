@@ -71,6 +71,9 @@ export class DoomSim {
   /** sound events emitted this tic (read by the audio layer; not state) */
   soundEvents: SoundEvent[] = [];
 
+  /** player kills this tic (read by the UI for the kill feed; not state) */
+  fragEvents: { killer: number | null; victim: number }[] = [];
+
   /** shared states; the block-gun module appends its custom states */
   stateTable: readonly StateRow[] = states;
 
@@ -529,6 +532,7 @@ export class DoomSim {
 
   runTic(cmds: TicCmd[]): void {
     this.soundEvents.length = 0;
+    this.fragEvents.length = 0;
 
     // G_Ticker: respawn dead players before thinking
     for (let i = 0; i < MAXPLAYERS; i++) {

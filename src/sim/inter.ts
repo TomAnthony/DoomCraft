@@ -352,6 +352,7 @@ function killMobj(sim: DoomSim, source: Mobj | null, target: Mobj): void {
     if (target.flags & MF.COUNTKILL) source.player.killcount++;
     if (target.player) {
       source.player.frags[target.player.index] = source.player.frags[target.player.index]! + 1;
+      sim.fragEvents.push({ killer: source.player.index, victim: target.player.index });
     }
   }
   // (netgame: no "count all monster deaths to player 0" branch)
@@ -360,6 +361,9 @@ function killMobj(sim: DoomSim, source: Mobj | null, target: Mobj): void {
     // count environment kills against you
     if (!source) {
       target.player.frags[target.player.index] = target.player.frags[target.player.index]! + 1;
+    }
+    if (!source || !source.player) {
+      sim.fragEvents.push({ killer: null, victim: target.player.index });
     }
     target.flags &= ~MF.SOLID;
     target.player.playerstate = PlayerState.Dead;

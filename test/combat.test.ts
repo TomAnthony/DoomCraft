@@ -184,3 +184,24 @@ describe.skipIf(!wad)('4-player determinism', () => {
     }
   });
 });
+
+describe.skipIf(!wad)('frag events', () => {
+  test('player kills emit presentational frag events', () => {
+    const sim = newSim(1);
+    sim.playeringame[1] = true;
+    sim.netgame = true;
+    sim.deathmatch = true;
+    sim.loadLevel(readMap(wad!, 'MAP01'), 1, { spawnThings: false });
+    const p0 = sim.players[0]!.mo!;
+    const p1 = sim.players[1]!.mo!;
+    // p0 fatally damages p1 during a tic
+    sim.runTic([emptyCmd(), emptyCmd(), emptyCmd(), emptyCmd()]);
+    sim.damageMobj(p1, p0, p0, 1000);
+    expect(sim.fragEvents.length).toBe(1);
+    expect(sim.fragEvents[0]).toEqual({ killer: 0, victim: 1 });
+    expect(sim.players[0]!.frags[1]).toBe(1);
+    // events are per-tic transients
+    sim.runTic([emptyCmd(), emptyCmd(), emptyCmd(), emptyCmd()]);
+    expect(sim.fragEvents.length).toBe(0);
+  });
+});

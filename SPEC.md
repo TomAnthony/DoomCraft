@@ -137,7 +137,13 @@ player positions *(planned)*.
   tic (first tic with no relayed cmd from them) and every survivor calls
   dropPlayer at that tic — removing the marine deterministically — while
   play continues (a toast announces the departure). Replay-based resync
-  re-applies departures at their recorded tics.
+  re-applies departures at their recorded tics. Players may set a
+  display name in the start menu (max 12 chars; empty → "Player N");
+  names travel through the lobby (create/join → roster/start) and are
+  purely presentational — used in the lobby roster, the kill feed
+  ("X FRAGGED Y", from sim.fragEvents, transient per-tic like
+  soundEvents), and leave toasts — never entering sim state or
+  checksums.
 - **Wire format**: binary frames `[u8 type][u8 slot][payload]` — the slot
   byte is the SENDER for cmd/checksum frames (server broadcasts to all
   other peers) and the TARGET for WAD frames (server routes to one peer).
