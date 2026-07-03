@@ -13,6 +13,7 @@ import {
 import { FRACUNIT } from '../src/sim/fixed.ts';
 import type { DoomSim } from '../src/sim/sim.ts';
 import { emptyCmd, type TicCmd } from '../src/sim/ticcmd.ts';
+import { MT } from '../src/sim/data/info.gen.ts';
 import { pointInSubsector } from '../src/sim/maputl.ts';
 import { readMap } from '../src/wad/maps.ts';
 import { WadFile } from '../src/wad/wad.ts';
@@ -365,5 +366,38 @@ describe.skipIf(!wad)('blocks vs doors', () => {
     while ((sim.leveltime & 3) !== 0) sim.runTic([emptyCmd(), emptyCmd(), emptyCmd(), emptyCmd()]);
     sim.pmap.changeSector(door, true);
     expect(sim.blocks.get(cell!.bx, cell!.by, cell!.bz)!.hp).toBeLessThan(hpBefore);
+  });
+});
+
+describe.skipIf(!wad)('block debris', () => {
+  test('destroying a block spawns smoke puffs; manual removal does not', () => {
+    const sim = newSim();
+    const p = sim.players[0]!.mo!;
+    const bx = ((p.x + (96 << 16)) | 0) >> 21;
+    const by = p.y >> 21;
+    const bz = p.floorz >> 21;
+    sim.blocks.place(bx, by, bz);
+    const puffs = () =>
+      [...sim.mobjs()].filter((m) => m.type === MT.PUFF && !m.removed).length;
+
+    const before = puffs();
+    // violent destruction via the sim's own splash path
+    sim.blocks.get(bx, by, bz)!.hp = 1;
+    sim.pmap.changeSector; // (no-op ref)
+    // use the crusher grind path: force a fake sector squeeze
+    const sector = pointInSubsector(sim.world, (bx * (32 << 16) + (16 << 16)) | 0, (by * (32 << 16) + (16 << 16)) | 0).sector;
+    const oldCeil = sector.ceilingheight;
+    sector.ceilingheight = (bz * (32 << 16)) | 0; // below block top
+    while ((sim.leveltime & 3) !== 0) sim.runTic([emptyCmd(), emptyCmd(), emptyCmd(), emptyCmd()]);
+    sim.pmap.changeSector(sector, true);
+    sector.ceilingheight = oldCeil;
+    expect(sim.blocks.isSolid(bx, by, bz)).toBe(false);
+    expect(puffs()).toBeGreaterThan(before);
+
+    // manual removal: no debris
+    sim.blocks.place(bx, by, bz);
+    const mid = puffs();
+    sim.blocks.remove(bx, by, bz);
+    expect(puffs()).toBe(mid);
   });
 });

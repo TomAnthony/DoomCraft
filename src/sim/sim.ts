@@ -475,6 +475,8 @@ export class DoomSim {
   blockAdjust: ((thing: Mobj, x: Fixed, y: Fixed) => void) | null = null;
   blockStomp: ((thing: Mobj, x: Fixed, y: Fixed, floorz: Fixed) => void) | null = null;
   blockSectorHook: ((sector: Sector, crunch: boolean) => boolean) | null = null;
+  /** debris effect when a block is violently destroyed (installBlocks) */
+  blockDestroyed: ((bx: number, by: number, bz: number) => void) | null = null;
   /** blocks: sight check WITHOUT block occlusion (radius attacks use it) */
   checkSightBase: ((t1: Mobj, t2: Mobj) => boolean) | null = null;
   /** A_BossDeath floor triggers (wired to the specials module) */

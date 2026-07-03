@@ -64,6 +64,7 @@ class Combat {
       const destroyed = this.sim.blocks.damage(hit.bx, hit.by, hit.bz, this.laDamage);
       if (destroyed) {
         this.sim.startSoundXY(x, y, 'barexp');
+        this.sim.blockDestroyed?.(hit.bx, hit.by, hit.bz);
       }
     }
   }

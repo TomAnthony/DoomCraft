@@ -13,6 +13,20 @@ import { installBlockGun } from './gun.ts';
 export function installBlocks(sim: DoomSim): void {
   installBlockGun(sim);
 
+  // Violent destruction spawns a small burst of bullet-puff smoke at the
+  // cell (deliberate right-click removal stays clean). Puffs use
+  // pRandom for jitter, so this is part of the deterministic sim.
+  const debris = (bx: number, by: number, bz: number): void => {
+    const cx = (bx * BLOCK_FX + BLOCK_FX / 2) | 0;
+    const cy = (by * BLOCK_FX + BLOCK_FX / 2) | 0;
+    const cz = (bz * BLOCK_FX + BLOCK_FX / 2) | 0;
+    const off = 10 << FRACBITS;
+    sim.spawnPuff(cx, cy, (cz + off) | 0);
+    sim.spawnPuff((cx - off) | 0, (cy - off) | 0, cz);
+    sim.spawnPuff((cx + off) | 0, (cy + off) | 0, (cz - (4 << FRACBITS)) | 0);
+  };
+  sim.blockDestroyed = debris;
+
   // Choke point 1: movement gap-finding in P_CheckPosition (loadLevel
   // re-wires this onto each level's fresh PMap).
   sim.blockAdjust = (thing: Mobj, x: Fixed, y: Fixed) => {
@@ -43,7 +57,10 @@ export function installBlocks(sim: DoomSim): void {
       const ctop = cbottom + BLOCK_FX;
       if (ctop > floorz && cbottom < top) doomed.push(cell);
     }
-    for (const c of doomed) sim.blocks.remove(c.bx, c.by, c.bz);
+    for (const c of doomed) {
+      sim.blocks.remove(c.bx, c.by, c.bz);
+      debris(c.bx, c.by, c.bz);
+    }
   };
   if (sim.pmap) sim.pmap.stompBlocks = sim.blockStomp;
 
@@ -78,7 +95,9 @@ export function installBlocks(sim: DoomSim): void {
       if (top <= sector.ceilingheight) continue;
       if (!cellTouchesSector(cell.bx, cell.by, sector)) continue;
       if (crunch && (sim.leveltime & 3) === 0) {
-        sim.blocks.damage(cell.bx, cell.by, cell.bz, 10);
+        if (sim.blocks.damage(cell.bx, cell.by, cell.bz, 10)) {
+          debris(cell.bx, cell.by, cell.bz);
+        }
       }
       blocked = true;
     }
@@ -135,6 +154,7 @@ export function installBlocks(sim: DoomSim): void {
     for (const d of hits) {
       if (sim.blocks.damage(d.bx, d.by, d.bz, d.eff)) {
         sim.startSoundXY(d.bx * BLOCK_FX, d.by * BLOCK_FX, 'barexp');
+        debris(d.bx, d.by, d.bz);
       }
     }
   };
@@ -156,6 +176,7 @@ export function installBlocks(sim: DoomSim): void {
             Math.abs(cz - mo.z) <= radius
           ) {
             sim.blocks.remove(cell.bx, cell.by, cell.bz);
+            debris(cell.bx, cell.by, cell.bz);
           }
         }
         sim.startSoundXY(mo.x, mo.y, 'barexp');
@@ -172,6 +193,7 @@ export function installBlocks(sim: DoomSim): void {
         if (hit) {
           if (sim.blocks.damage(hit.bx, hit.by, hit.bz, mo.info.damage * 4)) {
             sim.startSoundXY(mo.x, mo.y, 'barexp');
+            debris(hit.bx, hit.by, hit.bz);
           }
         }
       }

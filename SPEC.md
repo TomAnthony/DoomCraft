@@ -86,6 +86,10 @@ player positions *(planned)*.
 - **Remove** (alt-fire): deletes the targeted block within 512 units.
 - **Destructibility**: each block has **35 HP** (3–4 pistol shots at 5–15
   damage). Any hitscan hit or projectile impact damages the block it strikes.
+  Violent destruction (gunfire, splash, missile impact, BFG, crushers,
+  telefrag) spawns a burst of bullet-puff smoke at the cell (part of the
+  deterministic sim — puffs consume pRandom); deliberate right-click
+  removal stays clean.
 - **Splash through walls**: explosion damage (`P_RadiusAttack`) is traced
   through the grid and attenuated per intervening block *before* those blocks
   are destroyed. Tuning targets: rocket splash fully stopped by 3 blocks of

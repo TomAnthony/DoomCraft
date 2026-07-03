@@ -53,6 +53,10 @@ export function showStartMenu(root: HTMLElement): void {
         <button id="menu-join" style="flex:2;padding:12px;background:#282828;color:#fff;
           border:1px solid #822;font:bold 18px monospace;cursor:pointer">JOIN GAME</button>
       </div>
+      <div style="margin-top:16px;color:#a66;font:11px monospace">
+        Please consider <a href="https://buymeacoffee.com/doomcraft" target="_blank"
+          rel="noopener" style="color:#e88">donating to server costs</a>.
+      </div>
     </div>`;
   root.appendChild(menu);
 
