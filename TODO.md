@@ -1,6 +1,6 @@
 # DoomCraft — TODO
 
-Living list of known gaps and future work. Items get struck through (or
+Living list of known gaps and potential future work. Items get struck through (or
 removed) as they land; anything sizeable also gets a SPEC.md update.
 
 ## Correctness / robustness

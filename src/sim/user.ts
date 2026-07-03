@@ -18,8 +18,11 @@ import type { Player } from './world.ts';
 const MAXBOB = 0x100000; // 16 pixels of bob
 const ANG5 = (ANG90 / 18) | 0;
 
-// Freelook clamp: ±ANG45*1.5 (≈67.5°), GZDoom-ish.
-const MAXPITCH = (0x20000000 + 0x10000000) | 0;
+// Freelook clamp: ±85° (GZDoom allows near-vertical). Steep pitch is
+// what makes Minecraft-style backward bridging (seeing the side face of
+// your own support block from an overhang) and nerd-pole placement
+// (aiming at the cell under your feet mid-jump) possible.
+const MAXPITCH = 1014089500 | 0; // 85/360 * 2^32
 
 function thrust(player: Player, angle: number, move: Fixed): void {
   const fine = angle >>> ANGLETOFINESHIFT;
@@ -73,10 +76,13 @@ function movePlayer(sim: DoomSim, player: Player): void {
 
   mo.angle = (mo.angle + (cmd.angleturn << FRACBITS)) | 0;
 
-  // Freelook (deviation): pitch from ticcmd, clamped.
-  mo.pitch = (mo.pitch + (cmd.pitch << FRACBITS)) | 0;
-  if (mo.pitch > MAXPITCH) mo.pitch = MAXPITCH;
-  if (mo.pitch < -MAXPITCH) mo.pitch = -MAXPITCH;
+  // Freelook (deviation): pitch from ticcmd, clamped. Sum in doubles
+  // (exact for these magnitudes): pitch + max cmd delta exceeds int32
+  // and would wrap, snapping the view from floor-gaze to ceiling-gaze.
+  let np = mo.pitch + cmd.pitch * 65536;
+  if (np > MAXPITCH) np = MAXPITCH;
+  if (np < -MAXPITCH) np = -MAXPITCH;
+  mo.pitch = np | 0;
 
   // Do not let the player control movement if not onground —
   // except for a small GZDoom-style air control (part of the jump

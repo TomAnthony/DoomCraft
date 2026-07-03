@@ -42,8 +42,10 @@ AI (`p_enemy.c`), and weapon logic (`p_pspr.c`).
 **Deliberate deviations from vanilla** (GZDoom-style, user-requested):
 
 1. **Jump**: bound key sets `momz = 8*FRACUNIT` when on ground.
-2. **Freelook**: mouse pitch; weapons fire along the view pitch with a
-   GZDoom-like autoaim assist near targets.
+2. **Freelook**: mouse pitch, clamped at ±85° (near-vertical — this is
+   what makes Minecraft-style bridging and nerd-poling possible); weapons
+   fire along the view pitch with a GZDoom-like autoaim assist near
+   targets.
 
 Everything else aims vanilla. Fidelity oracle: DOOM2.WAD's built-in DEMO1–3
 replayed through the sim must match a Chocolate Doom reference dump of per-tic
@@ -94,6 +96,22 @@ player positions *(planned)*.
   top, and walk under bridges; removing a supporting block re-runs support
   checks so gravity applies. Blocks block hitscan, projectiles, and monster
   sight (3D DDA). Blocks are per-level and cleared on exit.
+- **Minecraft parity moves**: *backward bridging* — walk backward off
+  an edge (your eye can overhang up to 16 units while a corner of the
+  collision box keeps support), look steeply down at the exposed side
+  face of your support block, and place to extend the bridge under
+  yourself. *Nerd-poling* — look straight down, jump, and place at the
+  apex (~36 units, clearing the 32-unit cell): the block lands squarely
+  beneath you (crossings inside your own footprint snap to your center
+  cell) and you land on top. Like Minecraft, you can never place a
+  block inside your own (or anyone's) bounding box — jumping first is
+  the mechanic. On misaligned sector floors the first block is
+  partially buried (top at the next 32 boundary), then subsequent
+  blocks lift a full 32.
+- **Teleports telefrag blocks**: any block overlapping the arrival
+  space of a teleporting player or monster is destroyed (exactly like
+  monsters being stomped), so paving a teleporter destination can't
+  entomb anyone.
 - **Jump/climb nuance**: the jump apex is ~36 map units, so a +32 rise
   between block tops is always jumpable, but a grid-aligned block whose
   top sits more than ~36 above a misaligned sector floor is not directly

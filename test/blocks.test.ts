@@ -231,3 +231,81 @@ describe.skipIf(!wad)('block gun', () => {
     expect(a.blocks.count).toBe(b.blocks.count);
   });
 });
+
+describe.skipIf(!wad)('minecraft parity', () => {
+  test('teleporting telefrags blocks in the arrival space', () => {
+    const sim = newSim();
+    const p = sim.players[0]!.mo!;
+    const dx = (p.x + (128 << 16)) | 0;
+    const dy = p.y;
+    // pave exactly the arrival footprint, two blocks high
+    const bx1 = (dx - p.radius) >> 21; // BLOCK_SHIFT
+    const bx2 = ((dx + p.radius - 1) | 0) >> 21;
+    const by1 = (dy - p.radius) >> 21;
+    const by2 = ((dy + p.radius - 1) | 0) >> 21;
+    const zc = p.floorz >> 21;
+    for (let cx = bx1; cx <= bx2; cx++) {
+      for (let cy = by1; cy <= by2; cy++) {
+        sim.blocks.place(cx, cy, zc);
+        sim.blocks.place(cx, cy, zc + 1);
+      }
+    }
+    const placed = sim.blocks.count;
+    expect(placed).toBeGreaterThan(0);
+
+    expect(sim.pmap.teleportMove(p, dx, dy)).toBe(true);
+    // every block in the arrival space is telefragged…
+    expect(sim.blocks.count).toBe(0);
+    expect(p.z).toBe(p.floorz);
+    // …and the player can actually walk away (spawn faces north: use xy distance)
+    const bx0 = p.x;
+    const by0 = p.y;
+    for (let t = 0; t < 35; t++) {
+      const cmd = emptyCmd();
+      cmd.forwardmove = 50;
+      sim.runTic([cmd]);
+    }
+    const moved = Math.hypot((p.x - bx0) / 65536, (p.y - by0) / 65536);
+    expect(moved).toBeGreaterThan(16);
+  });
+
+  test('nerd-pole: look down, jump, place at apex lifts the player', () => {
+    const sim = newSim();
+    const p = sim.players[0]!;
+    const mo = p.mo!;
+    const startFloor = mo.floorz;
+
+    // select the block gun and let it raise
+    let cmd = emptyCmd();
+    cmd.buttons = 4 /* BT_CHANGE */ | (7 << 3); // weapon slot 8
+    sim.runTic([cmd]);
+    for (let t = 0; t < 30; t++) sim.runTic([emptyCmd()]);
+    expect(p.readyweapon).toBe(10);
+
+    // aim almost straight down (pitch accumulates per tic, sim clamps)
+    for (let t = 0; t < 40; t++) {
+      cmd = emptyCmd();
+      cmd.pitch = -32000;
+      sim.runTic([cmd]);
+    }
+
+    // jump and hold fire; repeat a few times — placement must succeed
+    // in some apex window (self-intersection blocks it while grounded)
+    for (let round = 0; round < 6 && mo.floorz === startFloor; round++) {
+      cmd = emptyCmd();
+      cmd.buttons2 = 1; // BT2_JUMP
+      cmd.buttons = 1; // BT_ATTACK held
+      sim.runTic([cmd]);
+      for (let t = 0; t < 30; t++) {
+        cmd = emptyCmd();
+        cmd.buttons = 1;
+        sim.runTic([cmd]);
+      }
+    }
+    // the player now stands on a block they placed beneath themselves
+    // (MAP01's floor is at 56, so the first buried block lifts to 64)
+    expect(mo.floorz).toBeGreaterThan(startFloor);
+    expect(mo.z).toBe(mo.floorz);
+    expect(sim.blocks.count).toBeGreaterThan(0);
+  });
+});

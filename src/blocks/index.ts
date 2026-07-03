@@ -6,7 +6,7 @@ import { MT } from '../sim/data/info.gen.ts';
 import { FRACBITS, type Fixed } from '../sim/fixed.ts';
 import type { DoomSim } from '../sim/sim.ts';
 import type { Mobj } from '../sim/world.ts';
-import { BLOCK_FX, SPLASH_ATTEN_PER_BLOCK } from './grid.ts';
+import { BLOCK_FX, BLOCK_SHIFT, SPLASH_ATTEN_PER_BLOCK } from './grid.ts';
 import { installBlockGun } from './gun.ts';
 
 export function installBlocks(sim: DoomSim): void {
@@ -24,6 +24,27 @@ export function installBlocks(sim: DoomSim): void {
     sim.pmap.tmceilingz = adjusted.ceilingz;
   };
   if (sim.pmap) sim.pmap.adjustHeights = sim.blockAdjust;
+
+  // Teleports telefrag blocks: anything in the arrival space is
+  // destroyed (like monsters being stomped), so a paved teleporter
+  // destination can't entomb the arriving player or monster.
+  sim.blockStomp = (thing: Mobj, x: Fixed, y: Fixed, floorz: Fixed) => {
+    if (sim.blocks.count === 0) return;
+    const bx1 = (x - thing.radius) >> BLOCK_SHIFT;
+    const bx2 = ((x + thing.radius - 1) | 0) >> BLOCK_SHIFT;
+    const by1 = (y - thing.radius) >> BLOCK_SHIFT;
+    const by2 = ((y + thing.radius - 1) | 0) >> BLOCK_SHIFT;
+    const top = (floorz + thing.height) | 0;
+    const doomed: { bx: number; by: number; bz: number }[] = [];
+    for (const cell of sim.blocks.entries()) {
+      if (cell.bx < bx1 || cell.bx > bx2 || cell.by < by1 || cell.by > by2) continue;
+      const cbottom = cell.bz * BLOCK_FX;
+      const ctop = cbottom + BLOCK_FX;
+      if (ctop > floorz && cbottom < top) doomed.push(cell);
+    }
+    for (const c of doomed) sim.blocks.remove(c.bx, c.by, c.bz);
+  };
+  if (sim.pmap) sim.pmap.stompBlocks = sim.blockStomp;
 
   // Choke point 4: blocks occlude monster sight (but NOT radius attacks,
   // which use checkSightBase and per-depth attenuation instead).

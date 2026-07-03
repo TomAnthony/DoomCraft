@@ -71,6 +71,9 @@ export class PMap {
    */
   adjustHeights: ((thing: Mobj, x: Fixed, y: Fixed) => void) | null = null;
 
+  /** hook: teleports destroy blocks in the arrival space (installBlocks) */
+  stompBlocks: ((thing: Mobj, x: Fixed, y: Fixed, floorz: Fixed) => void) | null = null;
+
   // slide move state
   private bestslidefrac: Fixed = 0;
   private bestslideline: Line | null = null;
@@ -130,6 +133,10 @@ export class PMap {
         if (!this.tr.blockThingsIterator(bx, by, (t) => this.stompThing(t))) return false;
       }
     }
+
+    // DoomCraft: teleports telefrag blocks in the arrival space, exactly
+    // like monsters get stomped — a paved destination can't entomb you
+    this.stompBlocks?.(thing, x, y, this.tmfloorz);
 
     unsetThingPosition(w, thing);
     thing.floorz = this.tmfloorz;

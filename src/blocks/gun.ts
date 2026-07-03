@@ -110,6 +110,32 @@ export function gunTarget(sim: DoomSim, player: Player): GunTarget {
     const sz = (shootz + FixedMul(slope, frac)) | 0;
     const sector = pointInSubsector(sim.world, sx, sy).sector;
     if (sz <= sector.floorheight || sz >= sector.ceilingheight) {
+      if (prev) return { hitCell: prev, placeCell: prev };
+      // Steep ray (near-vertical aim, e.g. nerd-poling): the first
+      // coarse sample already crossed the plane, so compute the exact
+      // crossing and take the cell just before it.
+      if (slope !== 0) {
+        const floorCross = sz <= sector.floorheight;
+        const plane = floorCross ? sector.floorheight : sector.ceilingheight;
+        let t = FixedDiv((plane - shootz) | 0, slope);
+        t = t > (1 << 12) ? (t - (1 << 12)) | 0 : 0; // nudge back inside
+        let cx = (mo.x + FixedMul(finecosine(fine), t)) | 0;
+        let cy = (mo.y + FixedMul(finesine[fine]!, t)) | 0;
+        // crossing inside our own footprint = placing under ourselves
+        // (nerd-poling): snap to our center cell so the block lands
+        // squarely beneath us, immune to cell-boundary ray jitter
+        const dxa = cx - mo.x;
+        const dya = cy - mo.y;
+        if (dxa > -mo.radius && dxa < mo.radius && dya > -mo.radius && dya < mo.radius) {
+          cx = mo.x;
+          cy = mo.y;
+        }
+        // derive the cell's z from the PLANE, not the nudged ray point —
+        // ray numerics at ±85° jitter across cell boundaries
+        const bz = floorCross ? plane >> BLOCK_SHIFT : ((plane - 1) | 0) >> BLOCK_SHIFT;
+        const cell = { bx: cx >> BLOCK_SHIFT, by: cy >> BLOCK_SHIFT, bz };
+        return { hitCell: cell, placeCell: cell };
+      }
       return { hitCell: prev, placeCell: prev };
     }
     prev = { bx: sx >> BLOCK_SHIFT, by: sy >> BLOCK_SHIFT, bz: sz >> BLOCK_SHIFT };
