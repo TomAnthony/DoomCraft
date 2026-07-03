@@ -18,11 +18,16 @@ describes. Sections marked *(planned)* are specified but not yet implemented.
   single-player rules: player start, keys spawn and are consumed.)
 - **No single-player mode**, no menus/options/automap/savegames/demos-as-a-feature.
 - **Levels**: all 32 maps (MAP01–MAP30 + secret MAP31/MAP32, reached via
-  secret exits: 15→31, 31→32, 32→16) from the user's own `DOOM2.WAD`, which is the source
-  of truth for geometry, textures, sprites, sounds, and thing placement. The
-  WAD is never committed, bundled, served publicly, or transmitted between
-  players — each player supplies their own local copy, verified identical by
-  hash in the lobby.
+  secret exits: 15→31, 31→32, 32→16) from a Doom 2-format IWAD, the source
+  of truth for geometry, textures, sprites, sounds, and thing placement.
+  Game data resolution (src/wad/load.ts): `?wad=<key>` (server-registered
+  via `--wad path:key`, key can be secret) → saved menu choice (server
+  builtins or the browser's IndexedDB library) → /DOOM2.WAD (dev only) →
+  /freedm.wad (freely-distributable default, deathmatch-only maps) →
+  interactive picker. Commercial WADs are never committed and never
+  served unless explicitly registered; the host's WAD is transferred to
+  the joiner through the relay when hashes differ, so both sims are
+  byte-identical by construction.
 - **Exit**: either player triggering a level exit advances both players to the
   next map. Doom2's text interludes (after MAP06/11/20/30) render as a simple
   text overlay.
@@ -110,7 +115,9 @@ player positions *(planned)*.
 - **Server** (`server/main.ts`): single Node process — WebSocket relay with
   4-character room codes plus static hosting of `dist/`. JSON lobby
   (create/join); the game starts automatically when the second player
-  joins; WAD hash compared at join, mismatch refused; in-game it relays
+  joins; WAD hash compared at join — on mismatch the host streams its
+  WAD to the joiner via the relay (256KB binary chunks, verified by
+  hash, cached in IndexedDB) before start; in-game it relays
   opaque binary frames and holds no game state.
 - **Joining**: creator opens `/?server=ws://host:8666&map=N` and shares the
   room code; the other player opens `/?server=ws://host:8666&room=CODE`.
