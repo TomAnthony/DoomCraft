@@ -187,7 +187,7 @@ export class Player {
   extralight = 0;
   fixedcolormap = 0;
   /** frags[opponentIndex] — vanilla per-player frag counts */
-  frags: number[] = [0, 0];
+  frags: number[] = [0, 0, 0, 0];
   /** invuln, strength, invisibility, ironfeet, allmap, infrared (tics) */
   powers: number[] = [0, 0, 0, 0, 0, 0];
   /** indices 0-8 vanilla; 9 = NoChange pad; 10 = block gun (always owned) */

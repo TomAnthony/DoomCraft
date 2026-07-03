@@ -73,7 +73,7 @@ export const BT2_JUMP = 1;
 export const BT2_BLOCKPLACE = 2;
 export const BT2_BLOCKREMOVE = 4;
 
-export const MAXPLAYERS = 2;
+export const MAXPLAYERS = 4; // vanilla
 
 // Frame flags (info.h / p_pspr.h)
 export const FF_FULLBRIGHT = 0x8000;

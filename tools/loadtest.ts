@@ -35,15 +35,25 @@ async function makeRoom(): Promise<[WebSocket, WebSocket]> {
     a.send(JSON.stringify({ t: 'create', map: 1, wadHash: 'load' }));
   });
   const b = await connect();
-  await new Promise<void>((resolve) => {
+  const bStarted = new Promise<void>((resolve) => {
     b.on('message', function h(data, isBinary) {
       if (!isBinary && JSON.parse(String(data)).t === 'start') {
         b.off('message', h);
         resolve();
       }
     });
+  });
+  await new Promise<void>((resolve) => {
+    b.on('message', function h(data, isBinary) {
+      if (!isBinary && JSON.parse(String(data)).t === 'joined') {
+        b.off('message', h);
+        resolve();
+      }
+    });
     b.send(JSON.stringify({ t: 'join', room: code, wadHash: 'load' }));
   });
+  a.send(JSON.stringify({ t: 'begin' }));
+  await bStarted;
   return [a, b];
 }
 
@@ -63,9 +73,8 @@ for (const [a, b] of pairs) {
       if (!isBinary) return;
       received++;
       const view = new DataView(data as ArrayBuffer);
-      if (view.byteLength >= 9 && view.getUint8(0) === 1) {
-        // sender embedded a timestamp (ms since start, f32-ish precision ok)
-        const t = view.getFloat64(1);
+      if (view.byteLength >= 14 && view.getUint8(0) === 1) {
+        const t = view.getFloat64(6);
         latencies.push(performance.now() - t);
       }
     });
@@ -73,7 +82,7 @@ for (const [a, b] of pairs) {
 }
 
 console.log(`driving 35Hz for ${SECONDS}s…`);
-const frame = new ArrayBuffer(15);
+const frame = new ArrayBuffer(16);
 const view = new DataView(frame);
 view.setUint8(0, 1);
 const timers: NodeJS.Timeout[] = [];
@@ -81,7 +90,7 @@ for (const [a, b] of pairs) {
   for (const ws of [a, b]) {
     timers.push(
       setInterval(() => {
-        view.setFloat64(1, performance.now());
+        view.setFloat64(6, performance.now());
         if (ws.readyState === WebSocket.OPEN && ws.bufferedAmount < 1024) {
           ws.send(frame);
           sent++;

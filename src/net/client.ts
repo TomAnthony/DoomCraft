@@ -18,11 +18,15 @@ import type { DoomSim } from '../sim/sim.ts';
 import { hashWad } from '../wad/wad.ts';
 import { decodeCmd, emptyCmd, encodeCmd, TICCMD_BYTES, type TicCmd } from '../sim/ticcmd.ts';
 
+// Binary frames: [u8 type][u8 slot][...payload]. For CMD/CHECKSUM the
+// slot is the SENDER (server broadcasts to everyone else); for WAD
+// META/CHUNK it's the TARGET (server routes to that one peer).
 const MSG_CMD = 1;
 const MSG_CHECKSUM = 2;
 const MSG_WAD_META = 3;
 const MSG_WAD_CHUNK = 4;
 const WAD_CHUNK_SIZE = 256 * 1024;
+const MAX_NET_PLAYERS = 4;
 
 export const INPUT_DELAY = 3; // tics (~86ms)
 
@@ -31,6 +35,8 @@ export interface LobbyResult {
   map: number;
   skill: number;
   room: string;
+  /** number of players in the game (2-4) */
+  players: number;
   /** host rule: block gun available in this netgame */
   blockGun: boolean;
   /** set when the host transferred its WAD to us during the lobby */
@@ -47,15 +53,22 @@ export interface ConnectOptions {
   /** host side: supplies the bytes to stream on peerNeedsWad */
   wadProvider?: () => ArrayBuffer;
   onWadProgress?: (got: number, total: number) => void;
+  /** lobby roster updates: players present / WAD-ready */
+  onRoster?: (count: number, ready: number) => void;
 }
 
 export class NetClient {
   private ws: WebSocket | null = null;
   /** cmds[player][tic] */
-  private readonly cmds: Map<number, TicCmd>[] = [new Map(), new Map()];
+  private readonly cmds: Map<number, TicCmd>[] = [new Map(), new Map(), new Map(), new Map()];
   private readonly localChecksums = new Map<number, number>();
-  private readonly remoteChecksums = new Map<number, number>();
+  /** remoteChecksums[slot]: tic -> sum */
+  private readonly remoteChecksums: Map<number, number>[] = [
+    new Map(), new Map(), new Map(), new Map(),
+  ];
   slot = 0;
+  /** number of players once the game starts */
+  playerCount = 2;
   room = '';
   /** next tic to simulate */
   simTic = 0;
@@ -100,22 +113,28 @@ export class NetClient {
           this.room = msg.room;
         } else if (msg.t === 'start') {
           this.slot = msg.slot;
-          // the host offers the persistent in-game cmd channel
-          if (msg.slot === 0) void this.openGameChannel();
+          this.playerCount = msg.players ?? 2;
+          // RTC cmd transport is 2-player only for now (3-4 players run
+          // relay-first; a per-pair mesh is future work). The host offers
+          // the persistent in-game cmd channel.
+          if (msg.slot === 0 && this.playerCount === 2) void this.openGameChannel(1);
           resolve({
             slot: msg.slot,
             map: msg.map,
             skill: msg.skill,
             room: this.room,
+            players: this.playerCount,
             blockGun: msg.blockGun !== false,
             receivedWad: this.receivedWad ?? undefined,
           });
         } else if (msg.t === 'peerNeedsWad') {
-          if (opts.wadProvider) void this.transferWad(opts.wadProvider());
+          if (opts.wadProvider) void this.transferWad(opts.wadProvider(), msg.slot ?? 1);
         } else if (msg.t === 'awaitWad') {
           this.onWadProgress?.(0, 0); // "waiting for host…"
+        } else if (msg.t === 'roster') {
+          opts.onRoster?.(msg.count, msg.ready);
         } else if (msg.t === 'rtc') {
-          void this.onRtcSignal(msg.d);
+          void this.onRtcSignal(msg.d, msg.from ?? 0);
         } else if (msg.t === 'error') {
           reject(new Error(msg.reason));
         } else if (msg.t === 'peerleft') {
@@ -132,28 +151,35 @@ export class NetClient {
   // through the WebSocket when a direct connection can't be established
   // (e.g. symmetric NATs) within the timeout.
 
-  private rtcPc: RTCPeerConnection | null = null;
-  private pendingCands: RTCIceCandidateInit[] = [];
+  /** per-peer connections (WAD transfers + the 2-player game channel) */
+  private readonly rtcPeers = new Map<
+    number,
+    { pc: RTCPeerConnection; pendingCands: RTCIceCandidateInit[] }
+  >();
 
-  /** Host side: try direct WebRTC, fall back to the relay. */
-  private async transferWad(buf: ArrayBuffer): Promise<void> {
-    const viaRtc = await this.tryRtcSend(buf, 8000);
-    if (!viaRtc) {
-      console.info('WAD transfer: WebRTC unavailable, using relay fallback');
-      await this.sendWad(buf);
-    }
-    this.rtcPc?.close();
-    this.rtcPc = null;
+  private signal(to: number, d: unknown): void {
+    this.ws?.send(JSON.stringify({ t: 'rtc', to, d }));
   }
 
-  private tryRtcSend(buf: ArrayBuffer, timeoutMs: number): Promise<boolean> {
+  /** Host side: try direct WebRTC to one joiner, fall back to the relay. */
+  private async transferWad(buf: ArrayBuffer, target: number): Promise<void> {
+    const viaRtc = await this.tryRtcSend(buf, target, 8000);
+    if (!viaRtc) {
+      console.info(`WAD transfer: WebRTC unavailable, using relay fallback (slot ${target})`);
+      await this.sendWad(buf, target);
+    }
+    this.rtcPeers.get(target)?.pc.close();
+    this.rtcPeers.delete(target);
+  }
+
+  private tryRtcSend(buf: ArrayBuffer, target: number, timeoutMs: number): Promise<boolean> {
     return new Promise((resolve) => {
       let opened = false;
       try {
         const pc = new RTCPeerConnection({
           iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
         });
-        this.rtcPc = pc;
+        this.rtcPeers.set(target, { pc, pendingCands: [] });
         const dc = pc.createDataChannel('wad');
         dc.binaryType = 'arraybuffer';
         const timer = setTimeout(() => {
@@ -169,32 +195,34 @@ export class NetClient {
         dc.onopen = () => {
           opened = true;
           clearTimeout(timer);
-          console.info('WAD transfer: direct WebRTC channel open');
-          this.streamOverChannel(dc, buf).then(
+          console.info(`WAD transfer: direct WebRTC channel open (slot ${target})`);
+          this.streamOverChannel(dc, buf, target).then(
             () => resolve(true),
             () => resolve(false), // mid-stream failure → relay resends from scratch
           );
         };
         pc.onicecandidate = (e) => {
-          if (e.candidate) this.ws?.send(JSON.stringify({ t: 'rtc', d: { cand: e.candidate } }));
+          if (e.candidate) this.signal(target, { cand: e.candidate });
         };
         void pc
           .createOffer()
           .then((o) => pc.setLocalDescription(o))
-          .then(() => this.ws?.send(JSON.stringify({ t: 'rtc', d: { sdp: pc.localDescription } })));
+          .then(() => this.signal(target, { sdp: pc.localDescription }));
       } catch {
         resolve(false);
       }
     });
   }
 
-  /** Joiner side: answer the host's offer; channel frames feed the same
-   *  assembler as relay frames. */
-  private async onRtcSignal(d: {
-    sdp?: RTCSessionDescriptionInit;
-    cand?: RTCIceCandidateInit;
-    hint?: string;
-  }): Promise<void> {
+  /** Answer offers / apply answers+candidates, per peer ('from'). */
+  private async onRtcSignal(
+    d: {
+      sdp?: RTCSessionDescriptionInit;
+      cand?: RTCIceCandidateInit;
+      hint?: string;
+    },
+    from: number,
+  ): Promise<void> {
     try {
       if (d.hint === 'demote') {
         if (this.path !== 'relay') this.demotePath('peer hint');
@@ -204,8 +232,9 @@ export class NetClient {
         const pc = new RTCPeerConnection({
           iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
         });
-        this.rtcPc = pc;
-        this.pendingCands = [];
+        const entry = { pc, pendingCands: [] as RTCIceCandidateInit[] };
+        this.rtcPeers.get(from)?.pc.close();
+        this.rtcPeers.set(from, entry);
         pc.ondatachannel = (e) => {
           if (e.channel.label === 'game') {
             // joiner side of the persistent in-game cmd channel
@@ -217,47 +246,65 @@ export class NetClient {
           e.channel.onmessage = (ev) => this.onBinary(new DataView(ev.data as ArrayBuffer));
         };
         pc.onicecandidate = (e) => {
-          if (e.candidate) this.ws?.send(JSON.stringify({ t: 'rtc', d: { cand: e.candidate } }));
+          if (e.candidate) this.signal(from, { cand: e.candidate });
         };
         await pc.setRemoteDescription(d.sdp);
-        for (const c of this.pendingCands.splice(0)) {
+        for (const c of entry.pendingCands.splice(0)) {
           await pc.addIceCandidate(c).catch(() => {});
         }
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        this.ws?.send(JSON.stringify({ t: 'rtc', d: { sdp: pc.localDescription } }));
+        this.signal(from, { sdp: pc.localDescription });
       } else if (d.sdp?.type === 'answer') {
-        await this.rtcPc?.setRemoteDescription(d.sdp);
-        for (const c of this.pendingCands.splice(0)) {
-          await this.rtcPc?.addIceCandidate(c).catch(() => {});
+        const entry = this.rtcPeers.get(from);
+        if (!entry) return;
+        await entry.pc.setRemoteDescription(d.sdp);
+        for (const c of entry.pendingCands.splice(0)) {
+          await entry.pc.addIceCandidate(c).catch(() => {});
         }
       } else if (d.cand) {
-        if (this.rtcPc?.remoteDescription) await this.rtcPc.addIceCandidate(d.cand).catch(() => {});
-        else this.pendingCands.push(d.cand);
+        const entry = this.rtcPeers.get(from);
+        if (!entry) return;
+        if (entry.pc.remoteDescription) await entry.pc.addIceCandidate(d.cand).catch(() => {});
+        else entry.pendingCands.push(d.cand);
       }
     } catch {
       // direct path failed — the host's timeout triggers the relay fallback
     }
   }
 
-  /** Stream meta+chunks over a DataChannel (16KB frames, backpressured). */
-  private async streamOverChannel(dc: RTCDataChannel, buf: ArrayBuffer): Promise<void> {
-    const CHUNK = 65536; // all current browsers accept 64KB DataChannel messages
-    const meta = new DataView(new ArrayBuffer(5));
+  private wadMeta(target: number, size: number): ArrayBuffer {
+    const meta = new DataView(new ArrayBuffer(6));
     meta.setUint8(0, MSG_WAD_META);
-    meta.setUint32(1, buf.byteLength, true);
-    dc.send(meta.buffer);
+    meta.setUint8(1, target);
+    meta.setUint32(2, size, true);
+    return meta.buffer;
+  }
+
+  private wadChunk(target: number, buf: ArrayBuffer, off: number, size: number): ArrayBuffer {
+    const chunk = buf.slice(off, Math.min(off + size, buf.byteLength));
+    const frame = new Uint8Array(6 + chunk.byteLength);
+    const view = new DataView(frame.buffer);
+    view.setUint8(0, MSG_WAD_CHUNK);
+    view.setUint8(1, target);
+    view.setUint32(2, off, true);
+    frame.set(new Uint8Array(chunk), 6);
+    return frame.buffer;
+  }
+
+  /** Stream meta+chunks over a DataChannel (64KB frames, backpressured). */
+  private async streamOverChannel(
+    dc: RTCDataChannel,
+    buf: ArrayBuffer,
+    target: number,
+  ): Promise<void> {
+    const CHUNK = 65536; // all current browsers accept 64KB DataChannel messages
+    dc.send(this.wadMeta(target, buf.byteLength));
     for (let off = 0; off < buf.byteLength; off += CHUNK) {
       while (dc.bufferedAmount > 4 * 1024 * 1024) {
         await new Promise((r) => setTimeout(r, 20));
       }
-      const chunk = buf.slice(off, Math.min(off + CHUNK, buf.byteLength));
-      const frame = new Uint8Array(5 + chunk.byteLength);
-      const view = new DataView(frame.buffer);
-      view.setUint8(0, MSG_WAD_CHUNK);
-      view.setUint32(1, off, true);
-      frame.set(new Uint8Array(chunk), 5);
-      dc.send(frame.buffer);
+      dc.send(this.wadChunk(target, buf, off, CHUNK));
     }
     // drain before the caller closes the connection — anything left in
     // bufferedAmount would be silently dropped with the tail unsent
@@ -267,32 +314,25 @@ export class NetClient {
   }
 
   /** Relay fallback: stream the WAD through the WebSocket server. */
-  private async sendWad(buf: ArrayBuffer): Promise<void> {
+  private async sendWad(buf: ArrayBuffer, target: number): Promise<void> {
     const ws = this.ws!;
-    const meta = new DataView(new ArrayBuffer(5));
-    meta.setUint8(0, MSG_WAD_META);
-    meta.setUint32(1, buf.byteLength, true);
-    ws.send(meta.buffer);
+    ws.send(this.wadMeta(target, buf.byteLength));
     for (let off = 0; off < buf.byteLength; off += WAD_CHUNK_SIZE) {
       // backpressure: don't queue the whole file into the socket buffer
       while (ws.bufferedAmount > 4 * WAD_CHUNK_SIZE) {
         await new Promise((r) => setTimeout(r, 25));
       }
-      const chunk = buf.slice(off, Math.min(off + WAD_CHUNK_SIZE, buf.byteLength));
-      const frame = new Uint8Array(5 + chunk.byteLength);
-      const view = new DataView(frame.buffer);
-      view.setUint8(0, MSG_WAD_CHUNK);
-      view.setUint32(1, off, true);
-      frame.set(new Uint8Array(chunk), 5);
-      ws.send(frame.buffer);
+      ws.send(this.wadChunk(target, buf, off, WAD_CHUNK_SIZE));
     }
   }
 
   private onBinary(view: DataView, src: 'ws' | 'rtc' = 'ws'): void {
     const type = view.getUint8(0);
+    const slot = view.getUint8(1); // sender (cmd/checksum) or target (wad)
     if (type === MSG_CMD) {
-      const tic = view.getUint32(1, true);
-      this.cmds[this.slot ^ 1]!.set(tic, decodeCmd(view, 5)); // dedup by tic
+      if (slot === this.slot || slot >= MAX_NET_PLAYERS) return;
+      const tic = view.getUint32(2, true);
+      this.cmds[slot]!.set(tic, decodeCmd(view, 6)); // dedup by (slot, tic)
       if (src === 'rtc') {
         this.highTicRtc = Math.max(this.highTicRtc, tic);
       } else {
@@ -304,15 +344,16 @@ export class NetClient {
         }
       }
     } else if (type === MSG_CHECKSUM) {
-      this.remoteChecksums.set(view.getUint32(1, true), view.getUint32(5, true));
+      if (slot >= MAX_NET_PLAYERS) return;
+      this.remoteChecksums[slot]!.set(view.getUint32(2, true), view.getUint32(6, true));
     } else if (type === MSG_WAD_META) {
       this.wadIncoming = {
-        buf: new Uint8Array(new ArrayBuffer(view.getUint32(1, true))),
+        buf: new Uint8Array(new ArrayBuffer(view.getUint32(2, true))),
         got: 0,
       };
     } else if (type === MSG_WAD_CHUNK && this.wadIncoming) {
-      const off = view.getUint32(1, true);
-      const data = new Uint8Array(view.buffer, view.byteOffset + 5, view.byteLength - 5);
+      const off = view.getUint32(2, true);
+      const data = new Uint8Array(view.buffer, view.byteOffset + 6, view.byteLength - 6);
       this.wadIncoming.buf.set(data, off);
       this.wadIncoming.got += data.byteLength;
       this.onWadProgress?.(this.wadIncoming.got, this.wadIncoming.buf.byteLength);
@@ -337,23 +378,24 @@ export class NetClient {
   private highTicRtc = -1;
   private highTicRelay = -1;
 
-  /** Host side: offer the persistent unordered in-game cmd channel. */
-  private async openGameChannel(): Promise<void> {
+  /** Host side: offer the persistent unordered in-game cmd channel
+   *  (2-player games only; 3-4 players are relay-first for now). */
+  private async openGameChannel(target: number): Promise<void> {
     try {
       const pc = new RTCPeerConnection({
         iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
       });
       this.gamePc = pc;
-      this.rtcPc = pc; // signalling (answer/candidates) routes here
-      this.pendingCands = [];
+      this.rtcPeers.get(target)?.pc.close();
+      this.rtcPeers.set(target, { pc, pendingCands: [] });
       const dc = pc.createDataChannel('game', { ordered: false });
       this.wireGameChannel(dc);
       pc.onicecandidate = (e) => {
-        if (e.candidate) this.ws?.send(JSON.stringify({ t: 'rtc', d: { cand: e.candidate } }));
+        if (e.candidate) this.signal(target, { cand: e.candidate });
       };
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      this.ws?.send(JSON.stringify({ t: 'rtc', d: { sdp: pc.localDescription } }));
+      this.signal(target, { sdp: pc.localDescription });
     } catch {
       // stays on relay
     }
@@ -386,8 +428,8 @@ export class NetClient {
       const c = this.cmds[this.slot]!.get(t);
       if (c) this.ws?.send(this.encodeFrame(t, c));
     }
-    // hint the peer so both sides converge quickly
-    this.ws?.send(JSON.stringify({ t: 'rtc', d: { hint: 'demote' } }));
+    // hint the peer so both sides converge quickly (2-player path)
+    this.signal(this.slot ^ 1, { hint: 'demote' });
     if (terminal) {
       this.path = 'relay';
       try {
@@ -414,11 +456,12 @@ export class NetClient {
   }
 
   private encodeFrame(tic: number, cmd: TicCmd): ArrayBuffer {
-    const buf = new ArrayBuffer(5 + TICCMD_BYTES);
+    const buf = new ArrayBuffer(6 + TICCMD_BYTES);
     const view = new DataView(buf);
     view.setUint8(0, MSG_CMD);
-    view.setUint32(1, tic, true);
-    encodeCmd(view, 5, cmd);
+    view.setUint8(1, this.slot);
+    view.setUint32(2, tic, true);
+    encodeCmd(view, 6, cmd);
     return buf;
   }
 
@@ -447,19 +490,22 @@ export class NetClient {
     }
   }
 
-  /** Both cmds available for the next tic? */
-  canAdvance(): boolean {
-    return (
-      this.cmds[0]!.has(this.simTic) &&
-      this.cmds[1]!.has(this.simTic) &&
-      this.desync === null
-    );
+  private allHave(tic: number): boolean {
+    for (let i = 0; i < this.playerCount; i++) {
+      if (!this.cmds[i]!.has(tic)) return false;
+    }
+    return true;
   }
 
-  /** Consecutive future tics for which both cmds are already buffered. */
+  /** Every player's cmd available for the next tic? */
+  canAdvance(): boolean {
+    return this.allHave(this.simTic) && this.desync === null;
+  }
+
+  /** Consecutive future tics for which all cmds are already buffered. */
   bufferedAhead(): number {
     let n = 0;
-    while (this.cmds[0]!.has(this.simTic + n) && this.cmds[1]!.has(this.simTic + n)) n++;
+    while (this.allHave(this.simTic + n)) n++;
     return n;
   }
 
@@ -468,20 +514,23 @@ export class NetClient {
    *  powers replay-based desync recovery. */
   advance(sim: DoomSim): number {
     const tic = this.simTic;
-    const c0 = this.cmds[0]!.get(tic) ?? emptyCmd();
-    const c1 = this.cmds[1]!.get(tic) ?? emptyCmd();
-    sim.runTic([c0, c1]);
+    const cmds: TicCmd[] = [];
+    for (let i = 0; i < MAX_NET_PLAYERS; i++) {
+      cmds.push(i < this.playerCount ? (this.cmds[i]!.get(tic) ?? emptyCmd()) : emptyCmd());
+    }
+    sim.runTic(cmds);
     this.simTic++;
 
-    // checksum exchange every 35 tics
+    // checksum exchange every 35 tics (broadcast; everyone compares all)
     if (tic % 35 === 0) {
       const sum = simChecksum(sim);
       this.localChecksums.set(tic, sum);
-      const buf = new ArrayBuffer(9);
+      const buf = new ArrayBuffer(10);
       const view = new DataView(buf);
       view.setUint8(0, MSG_CHECKSUM);
-      view.setUint32(1, tic, true);
-      view.setUint32(5, sum, true);
+      view.setUint8(1, this.slot);
+      view.setUint32(2, tic, true);
+      view.setUint32(6, sum, true);
       this.ws?.send(buf);
     }
     this.compareChecksums();
@@ -489,13 +538,24 @@ export class NetClient {
   }
 
   private compareChecksums(): void {
-    for (const [tic, remote] of this.remoteChecksums) {
-      const local = this.localChecksums.get(tic);
-      if (local === undefined) continue;
-      if (local !== remote) this.desync = tic;
-      this.localChecksums.delete(tic);
-      this.remoteChecksums.delete(tic);
+    for (let s = 0; s < this.playerCount; s++) {
+      if (s === this.slot) continue;
+      for (const [tic, remote] of this.remoteChecksums[s]!) {
+        const local = this.localChecksums.get(tic);
+        if (local === undefined) continue;
+        if (local !== remote) this.desync = tic;
+        this.remoteChecksums[s]!.delete(tic);
+      }
     }
+    // prune local sums everyone has consumed (keep the last few)
+    for (const tic of this.localChecksums.keys()) {
+      if (tic < this.simTic - 35 * 10) this.localChecksums.delete(tic);
+    }
+  }
+
+  /** Host: start the game with the players currently in the room. */
+  begin(): void {
+    this.ws?.send(JSON.stringify({ t: 'begin' }));
   }
 
   /** Cmd from the retained log (replay-based resync). */
@@ -526,7 +586,7 @@ export class NetClient {
   clearDesync(): void {
     this.desync = null;
     this.localChecksums.clear();
-    this.remoteChecksums.clear();
+    for (const m of this.remoteChecksums) m.clear();
   }
 
   close(): void {

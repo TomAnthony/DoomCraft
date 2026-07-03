@@ -101,9 +101,31 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
     netClient = new NetClient();
     const hash = wadBuffer ? await hashWad(wadBuffer) : null;
     try {
-      // surface the room code + a copyable invite link while waiting
+      // Host lobby: room code, invite link, roster, and a START button
+      // (2-4 players; the host decides when everyone's in). Joiners see
+      // a waiting screen driven by roster updates.
+      const isHost = !net.room;
       let shownRoom = '';
+      let rosterLine: HTMLElement | null = null;
+      let startBtn: HTMLButtonElement | null = null;
+      let lastRoster = { count: 1, ready: 1 };
+      const updateRosterUi = () => {
+        if (rosterLine) {
+          rosterLine.textContent = `${lastRoster.count} / 4 players in the room` +
+            (lastRoster.ready < lastRoster.count ? ` (${lastRoster.count - lastRoster.ready} receiving WAD…)` : '');
+        }
+        if (startBtn) {
+          const ok = lastRoster.count >= 2 && lastRoster.ready === lastRoster.count;
+          startBtn.disabled = !ok;
+          startBtn.style.opacity = ok ? '1' : '0.4';
+          startBtn.style.cursor = ok ? 'pointer' : 'default';
+        }
+        if (!isHost && shownRoom !== '#wad') {
+          status.textContent = `In room — waiting for the host to start… (${lastRoster.count} players)`;
+        }
+      };
       const poll = setInterval(() => {
+        if (!isHost) return;
         const room = netClient!.room;
         if (!room || room === shownRoom) return;
         shownRoom = room;
@@ -116,16 +138,22 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
           <div style="text-align:center">
             <div style="color:#a66;font:13px monospace;margin-bottom:8px">ROOM CODE</div>
             <div style="color:#e33;font:bold 56px monospace;letter-spacing:12px;user-select:all">${room}</div>
-            <div style="color:#a66;font:14px monospace;margin:18px 0 10px">waiting for player 2… send them this link:</div>
+            <div style="color:#a66;font:14px monospace;margin:18px 0 10px">send players this link (2-4 players):</div>
             <div style="display:flex;gap:8px;justify-content:center">
               <input id="lobby-url" readonly value="${joinUrl}" style="width:340px;background:#1a1a1a;
                 color:#ddd;border:1px solid #822;font:12px monospace;padding:8px"/>
               <button id="lobby-copy" style="padding:8px 16px;background:#822;color:#fff;border:none;
                 font:bold 14px monospace;cursor:pointer">COPY</button>
             </div>
+            <div id="lobby-roster" style="color:#8f8;font:14px monospace;margin:20px 0 12px">1 / 4 players in the room</div>
+            <button id="lobby-start" disabled style="padding:12px 48px;background:#822;color:#fff;border:none;
+              font:bold 18px monospace;opacity:0.4">START GAME</button>
           </div>`;
         const urlBox = status.querySelector('#lobby-url') as HTMLInputElement;
         const copyBtn = status.querySelector('#lobby-copy') as HTMLButtonElement;
+        rosterLine = status.querySelector('#lobby-roster') as HTMLElement;
+        startBtn = status.querySelector('#lobby-start') as HTMLButtonElement;
+        startBtn.addEventListener('click', () => netClient!.begin());
         urlBox.addEventListener('focus', () => urlBox.select());
         copyBtn.addEventListener('click', () => {
           urlBox.select();
@@ -133,6 +161,7 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
           copyBtn.textContent = 'COPIED!';
           setTimeout(() => (copyBtn.textContent = 'COPY'), 1500);
         });
+        updateRosterUi();
       }, 300);
       const lobby = await netClient.connect(net.url, {
         room: net.room,
@@ -140,6 +169,10 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
         blockGun: net.blockGun,
         wadHash: hash,
         wadProvider: () => wadBuffer!,
+        onRoster: (count, ready) => {
+          lastRoster = { count, ready };
+          updateRosterUi();
+        },
         onWadProgress: (got, total) => {
           shownRoom = '#wad'; // stop the invite-link poll overwriting us
           status.textContent =
@@ -264,8 +297,8 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
   const sim = createGameSim();
   sim.playeringame[0] = true;
   if (netClient) {
-    sim.playeringame[1] = true;
-    sim.netgame = true; // weapons stay placed for the other player
+    for (let i = 1; i < netClient.playerCount; i++) sim.playeringame[i] = true;
+    sim.netgame = true; // weapons stay placed for the other players
     sim.deathmatch = true; // DM spawn points, all keys, frags
     sim.allowBlockGun = blockGunAllowed; // host rule (lobby-agreed)
   }
@@ -427,7 +460,7 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
         map = nextMap(map, secret);
         loadLevelSim(map);
       }
-      sim.runTic([netClient.getCmd(0, t), netClient.getCmd(1, t)]);
+      sim.runTic([0, 1, 2, 3].map((i) => netClient!.getCmd(i, t)));
     }
     buildLevelRender(map);
     netClient.clearDesync();

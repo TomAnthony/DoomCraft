@@ -147,3 +147,40 @@ describe.skipIf(!wad)('teleporter regression', () => {
     expect(crossed).toBe(true);
   });
 });
+
+describe.skipIf(!wad)('4-player determinism', () => {
+  test('two sims, four players, 700 scripted tics stay checksum-identical', () => {
+    const mk = () => {
+      const sim = newSim(1);
+      for (let i = 0; i < 4; i++) sim.playeringame[i] = true;
+      sim.netgame = true;
+      sim.deathmatch = true;
+      sim.loadLevel(readMap(wad!, 'MAP01'), 1, { spawnThings: true });
+      return sim;
+    };
+    const a = mk();
+    const b = mk();
+    const mkCmds = (t: number) =>
+      [0, 1, 2, 3].map((i) => {
+        const c = emptyCmd();
+        c.forwardmove = ((t + i * 9) % 50) - 25;
+        c.sidemove = ((t * 3 + i * 5) % 40) - 20;
+        c.angleturn = ((t * 7 + i * 11) % 2000) - 1000;
+        if ((t + i) % 5 === 0) c.buttons = 1; // fire
+        if ((t + i) % 47 === 0) c.buttons2 = 1; // jump
+        return c;
+      });
+    for (let t = 0; t < 700; t++) {
+      a.runTic(mkCmds(t));
+      b.runTic(mkCmds(t));
+      if (t % 35 === 0) {
+        expect(simChecksum(a), `tic ${t}`).toBe(simChecksum(b));
+      }
+    }
+    // all four players alive-or-dead identically, frags arrays match
+    for (let i = 0; i < 4; i++) {
+      expect(a.players[i]!.health).toBe(b.players[i]!.health);
+      expect(a.players[i]!.frags.join(',')).toBe(b.players[i]!.frags.join(','));
+    }
+  });
+});

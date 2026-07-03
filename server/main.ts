@@ -1,7 +1,9 @@
 // DoomCraft relay server: WebSocket lobby with 4-char room codes plus
 // static hosting of the built client. Holds no game state — after start
-// it relays opaque binary frames between the two peers (including the
-// host→joiner WAD transfer, which is just binary frames to the relay).
+// it relays binary frames between up to 4 peers: cmd/checksum frames
+// (byte1 = sender slot) broadcast to everyone else; WAD transfer frames
+// (byte1 = target slot) route to one peer. The host starts the game
+// explicitly ('begin') once 2-4 players are present and WAD-ready.
 //
 // Usage: node --experimental-strip-types server/main.ts [port] [--wad path[:key]]...
 //
@@ -36,24 +38,49 @@ for (let i = 0; i < args.length; i++) {
   }
 }
 
+const MAX_ROOM_PLAYERS = 4;
+
 interface Room {
   code: string;
   map: number;
   skill: number;
   wadHash: string;
   blockGun: boolean; // host rule: block gun (slot 8) available
-  players: (WebSocket | null)[]; // slot 0 = creator
+  players: (WebSocket | null)[]; // slot 0 = creator/host
+  ready: boolean[]; // WAD hash verified per slot
+  started: boolean;
 }
 
 const rooms = new Map<string, Room>();
 
+function roster(r: Room): void {
+  const count = r.players.filter(Boolean).length;
+  const ready = r.players.filter((p, i) => p && r.ready[i]).length;
+  const msg = JSON.stringify({ t: 'roster', count, ready });
+  for (const p of r.players) {
+    if (p && p.readyState === WebSocket.OPEN) p.send(msg);
+  }
+}
+
+/** Compact slots (drop pre-start leavers) and start the game. */
 function start(r: Room): void {
-  for (let i = 0; i < 2; i++) {
-    r.players[i]!.send(
-      JSON.stringify({ t: 'start', map: r.map, skill: r.skill, slot: i, blockGun: r.blockGun }),
+  const live = r.players.filter(Boolean) as WebSocket[];
+  r.players = [...live];
+  while (r.players.length < MAX_ROOM_PLAYERS) r.players.push(null);
+  r.started = true;
+  for (let i = 0; i < live.length; i++) {
+    live[i]!.send(
+      JSON.stringify({
+        t: 'start',
+        map: r.map,
+        skill: r.skill,
+        slot: i,
+        players: live.length,
+        blockGun: r.blockGun,
+      }),
     );
   }
-  console.log(`room ${r.code} started`);
+  console.log(`room ${r.code} started with ${live.length} players`);
 }
 
 function makeCode(): string {
@@ -119,21 +146,42 @@ wss.on('connection', (ws) => {
   let room: Room | null = null;
   let slot = -1;
 
-  const peer = (): WebSocket | null => (room ? (room.players[slot ^ 1] ?? null) : null);
+  const sendTo = (p: WebSocket | null, data: unknown): void => {
+    if (p && p.readyState === WebSocket.OPEN) {
+      // a hopelessly backlogged socket (>64MB) gets killed rather than
+      // ballooning server memory
+      if (p.bufferedAmount > 64 * 1024 * 1024) p.terminate();
+      else p.send(data as Buffer);
+    }
+  };
 
   ws.on('message', (data, isBinary) => {
     if (isBinary) {
-      // in-game: relay verbatim to the other peer. If the peer's socket
-      // has fallen hopelessly behind (>64MB queued), kill it rather than
-      // letting its backlog balloon server memory.
-      const p = peer();
-      if (p && p.readyState === WebSocket.OPEN) {
-        if (p.bufferedAmount > 64 * 1024 * 1024) p.terminate();
-        else p.send(data);
+      if (!room) return;
+      // byte0 = type, byte1 = slot: cmd/checksum (1/2) broadcast from a
+      // sender; WAD meta/chunk (3/4) route to a target
+      const buf = data as Buffer;
+      const type = buf[0];
+      if (type === 3 || type === 4) {
+        sendTo(room.players[buf[1]!] ?? null, data);
+      } else {
+        for (let i = 0; i < room.players.length; i++) {
+          if (i !== slot) sendTo(room.players[i]!, data);
+        }
       }
       return;
     }
-    let msg: { t: string; room?: string; map?: number; skill?: number; wadHash?: string; blockGun?: boolean };
+    let msg: {
+      t: string;
+      room?: string;
+      map?: number;
+      skill?: number;
+      wadHash?: string;
+      blockGun?: boolean;
+      to?: number;
+      from?: number;
+      d?: unknown;
+    };
     try {
       msg = JSON.parse(String(data));
     } catch {
@@ -151,57 +199,81 @@ wss.on('connection', (ws) => {
         skill: msg.skill ?? 3,
         wadHash: msg.wadHash ?? '',
         blockGun: msg.blockGun !== false,
-        players: [ws, null],
+        players: [ws, null, null, null],
+        ready: [true, false, false, false],
+        started: false,
       };
       slot = 0;
       rooms.set(room.code, room);
       ws.send(JSON.stringify({ t: 'created', room: room.code }));
+      roster(room);
       console.log(`room ${room.code} created (MAP${String(room.map).padStart(2, '0')})`);
     } else if (msg.t === 'join') {
       const r = rooms.get((msg.room ?? '').toUpperCase());
-      if (!r) {
-        ws.send(JSON.stringify({ t: 'error', reason: 'no such room' }));
+      if (!r || r.started) {
+        ws.send(JSON.stringify({ t: 'error', reason: r ? 'game already started' : 'no such room' }));
         return;
       }
-      if (r.players[1]) {
+      const free = r.players.findIndex((p, i) => i > 0 && p === null);
+      if (free === -1) {
         ws.send(JSON.stringify({ t: 'error', reason: 'room full' }));
         return;
       }
-      r.players[1] = ws;
+      r.players[free] = ws;
+      r.ready[free] = msg.wadHash === r.wadHash;
       room = r;
-      slot = 1;
-      if (msg.wadHash === r.wadHash) {
-        start(r);
-      } else {
-        // joiner lacks the host's WAD: host streams it through the relay
-        // (binary frames), joiner confirms with wadReady when assembled
-        r.players[0]!.send(JSON.stringify({ t: 'peerNeedsWad' }));
+      slot = free;
+      ws.send(JSON.stringify({ t: 'joined', slot: free }));
+      if (!r.ready[free]) {
+        // joiner lacks the host's WAD: host streams it (RTC or relay),
+        // joiner confirms with wadReady when assembled
+        r.players[0]!.send(JSON.stringify({ t: 'peerNeedsWad', slot: free }));
         ws.send(JSON.stringify({ t: 'awaitWad' }));
-        console.log(`room ${r.code}: transferring WAD to joiner`);
+        console.log(`room ${r.code}: transferring WAD to slot ${free}`);
       }
+      roster(r);
     } else if (msg.t === 'rtc') {
-      // WebRTC signalling for the direct host→joiner WAD transfer:
-      // opaque to the server, just forwarded to the other peer
-      const p = peer();
-      if (p && p.readyState === WebSocket.OPEN) p.send(String(data));
+      // WebRTC signalling: addressed to a slot; server stamps the sender
+      if (!room) return;
+      const target = room.players[msg.to ?? (slot ^ 1)] ?? null;
+      if (target && target.readyState === WebSocket.OPEN) {
+        target.send(JSON.stringify({ ...msg, from: slot }));
+      }
     } else if (msg.t === 'wadReady') {
-      if (room && slot === 1) {
+      if (room && slot > 0) {
         if (msg.wadHash === room.wadHash) {
-          start(room);
+          room.ready[slot] = true;
+          roster(room);
         } else {
           ws.send(JSON.stringify({ t: 'error', reason: 'WAD transfer failed (hash mismatch)' }));
         }
+      }
+    } else if (msg.t === 'begin') {
+      // host starts the game once 2-4 players are present and ready
+      if (room && slot === 0 && !room.started) {
+        const present = room.players.filter(Boolean).length;
+        const allReady = room.players.every((p, i) => !p || room!.ready[i]);
+        if (present >= 2 && allReady) start(room);
+        else ws.send(JSON.stringify({ t: 'error', reason: 'players not ready' }));
       }
     }
   });
 
   ws.on('close', () => {
-    if (room) {
-      const p = peer();
-      if (p && p.readyState === WebSocket.OPEN) {
-        p.send(JSON.stringify({ t: 'peerleft' }));
+    if (!room) return;
+    if (room.started || slot === 0) {
+      // in-game leave (or host bailing pre-start) ends the room
+      for (const p of room.players) {
+        if (p && p !== ws && p.readyState === WebSocket.OPEN) {
+          p.send(JSON.stringify({ t: 'peerleft' }));
+        }
       }
       rooms.delete(room.code);
+    } else {
+      // pre-start joiner leave: free the slot
+      room.players[slot] = null;
+      room.ready[slot] = false;
+      roster(room);
     }
   });
 });

@@ -58,7 +58,7 @@ bundled, or served except when explicitly registered by the operator.
 GPL-2.0-only. Contains code ported from Chocolate Doom / the original Doom
 source release. Game data (`DOOM2.WAD`) is not included.
 
-## Playing multiplayer (hosting for a friend)
+## Playing multiplayer (2-4 players)
 
 One machine hosts everything on a single port:
 
@@ -73,9 +73,10 @@ the server warns on startup if that build is older than `src/`.)
    (or `/play` directly) opens the start menu — SOLO GAME, HOST
    MULTIPLAYER (with map/WAD pickers), and JOIN GAME.
 2. The host clicks HOST MULTIPLAYER and sends the invite link (COPY
-   button) or the 4-letter room code.
-3. The friend pastes the link, or types the code into JOIN GAME.
-4. The game starts the moment player 2 joins.
+   button) or the 4-letter room code to 1-3 friends.
+3. Friends paste the link, or type the code into JOIN GAME.
+4. The host's lobby shows the roster; START GAME begins the match once
+   2-4 players are in (and any WAD transfers have finished).
 
 Direct URLs: `/play?map=7` (solo), `/play?host&map=7`, `/play?room=CODE`.
 
@@ -105,6 +106,6 @@ Dev-mode alternative: run `npm run dev` (client on :5173) plus
 `npm run server` (relay on :8666) and use
 `/?server=ws://<host>:8666` / `&room=CODE` URLs on port 5173.
 
-Mode: deathmatch with monsters — DM spawn points, all keys carried,
+Mode: 2-4 player deathmatch with monsters — DM spawn points, all keys carried,
 weapons respawn 30s after pickup, monsters spawn once and cleared
 levels stay clear; dead players press E to respawn.

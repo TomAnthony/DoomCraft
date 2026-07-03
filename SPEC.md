@@ -1,13 +1,13 @@
 # DoomCraft — Specification
 
-A browser-based Doom 2 for exactly **2 players over the internet**, with an 8th
+A browser-based Doom 2 for **2-4 players over the internet**, with an 8th
 weapon that places and removes Minecraft-style blocks. This document is the
 living specification: it is updated in the same commit as the behavior it
 describes. Sections marked *(planned)* are specified but not yet implemented.
 
 ## 1. Product rules
 
-- **Players**: exactly 2, **deathmatch with monsters**: players spawn at
+- **Players**: 2-4 (vanilla MAXPLAYERS), **deathmatch with monsters**: players spawn at
   the map's deathmatch starts (randomly selected, vanilla
   G_DeathMatchSpawnPlayer, teleport fog and all), carry all keys (key
   pickups don't spawn), and frag each other — the status bar shows frags
@@ -130,13 +130,20 @@ player positions *(planned)*.
 
 - **Model**: delay-based deterministic lockstep at 35Hz with a 3-tic input
   delay (`INPUT_DELAY` in `src/net/client.ts`; adaptive delay is future
-  work). Both clients run identical sims; only inputs are exchanged.
-- **Wire format**: binary frames `[u8 type][u32 tic][payload]`.
-  Type 1 = ticcmd (10 bytes: `forwardmove i8, sidemove i8, angleturn i16,
-  pitch i16, buttons u8, buttons2 u8 (jump/place/remove), pad u16`); type 2 =
-  checksum (u32); types 3/4 = WAD transfer meta/chunk. Weapon selection
-  travels in `buttons` (vanilla BT_CHANGE + 3-bit mask).
-- **Hybrid cmd transport**: cmds prefer a direct WebRTC DataChannel
+  work). All 2-4 clients run identical sims; only inputs are exchanged.
+  The host opens a room, joiners accumulate (roster shown live), and the
+  host starts the game explicitly once 2-4 players are ready.
+- **Wire format**: binary frames `[u8 type][u8 slot][payload]` — the slot
+  byte is the SENDER for cmd/checksum frames (server broadcasts to all
+  other peers) and the TARGET for WAD frames (server routes to one peer).
+  Type 1 = ticcmd (`[u32 tic]` + 10 bytes: `forwardmove i8, sidemove i8,
+  angleturn i16, pitch i16, buttons u8, buttons2 u8 (jump/place/remove),
+  pad u16`); type 2 = checksum (`[u32 tic][u32 sum]`, broadcast — every
+  client compares every other client's sums); types 3/4 = WAD transfer
+  meta/chunk. Weapon selection travels in `buttons` (vanilla BT_CHANGE +
+  3-bit mask).
+- **Hybrid cmd transport** (2-player games; 3-4 players run relay-first —
+  a per-pair RTC mesh is future work): cmds prefer a direct WebRTC DataChannel
   (reliable, unordered — cmds are tic-keyed so ordering is irrelevant,
   which avoids head-of-line blocking), offered host→joiner at lobby
   start. While on RTC, every 35th cmd also goes through the ws relay as

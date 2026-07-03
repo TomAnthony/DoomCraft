@@ -26,6 +26,16 @@ removed) as they land; anything sizeable also gets a SPEC.md update.
       movement echoes ~86ms late (aim is latency-free, walking isn't).
       Prediction would remove the "swimming" feel on real internet links.
 
+- [ ] **RTC mesh for 3-4 players** — multiplayer cmds are relay-only for
+      3-4 players (2-player games use the RTC hybrid). A per-pair
+      DataChannel mesh with per-link demotion would cut relay traffic
+      and latency; the tic-keyed dedup already tolerates mixed paths,
+      and checksum majority-voting could pinpoint which client diverged.
+- [ ] **Player drop-out continuation** — a player leaving mid-game ends
+      it for everyone (lockstep needs all cmds). Vanilla-style dropout
+      (mark playeringame false at an agreed tic) would let 3 survivors
+      keep playing.
+
 ## Gameplay / polish
 
 - [ ] **Doom 2 story interludes** — the text screens after MAP06/11/20/30

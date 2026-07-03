@@ -25,8 +25,14 @@ const room = /room=([A-Z]{4})/.exec(joinUrl)?.[1];
 if (!room) throw new Error(`no room code in invite url: ${joinUrl}`);
 console.log(`room ${room} created`);
 
-// Player B joins.
+// Player B joins; the host starts the game.
 await pageB.goto(`${base}/play?server=${encodeURIComponent(relay)}&room=${room}`);
+await pageA.waitForFunction(
+  () => !(document.querySelector('#lobby-start') as HTMLButtonElement | null)?.disabled,
+  null,
+  { timeout: 15000 },
+);
+await pageA.click('#lobby-start');
 await pageB.waitForTimeout(4000);
 
 // Drive both players for ~8 seconds.
