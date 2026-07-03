@@ -668,10 +668,17 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
         }
         // lockstep: emit our cmd for (simTic + delay), then advance.
         // Pace advancement to 1 tic per slot so bursty cmd arrival
-        // doesn't turn into view stutter; scale catch-up with backlog.
+        // doesn't turn into view stutter — but reclaim any inflated
+        // send-sim gap (connection warm-up pushes cmds without
+        // advancing, and every tic of gap is a tic of permanent input
+        // latency). Only catch up while the peer-cmd buffer is healthy,
+        // so jittery links keep the smooth 1/slot cadence.
         netClient.pushLocalCmd(input.buildTicCmd());
+        const gap = netClient.sendTic - netClient.simTic;
         const ahead = netClient.bufferedAhead();
-        let allowed = ahead > 20 ? 4 : ahead > 6 ? 2 : 1;
+        let allowed = 1;
+        if (gap > INPUT_DELAY && ahead >= 2) allowed = 2;
+        if (gap > INPUT_DELAY + 6 && ahead >= 4) allowed = 4;
         while (
           allowed-- > 0 &&
           intermission === 0 &&
