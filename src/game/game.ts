@@ -82,7 +82,56 @@ export interface NetOptions {
   blockGun?: boolean;
 }
 
+/** Direct join links bypass the menu, so first-time joiners get a
+ *  one-field name prompt (skipped when a name is already stored). */
+function promptForName(root: HTMLElement): Promise<void> {
+  return new Promise((resolve) => {
+    const panel = document.createElement('div');
+    panel.style.cssText =
+      'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;' +
+      'font-family:monospace;background:radial-gradient(ellipse at center,#2a0f0f 0%,#000 75%);z-index:20';
+    panel.innerHTML = `
+      <div style="text-align:center">
+        <img src="/logo.png" alt="DoomCraft" width="120" height="120"
+          style="display:block;margin:0 auto 16px;filter:drop-shadow(0 0 16px rgba(255,60,0,0.3))">
+        <div style="color:#a66;font:14px monospace;margin-bottom:14px">You've been invited to a game.<br>What should we call you?</div>
+        <input id="join-name" maxlength="12" placeholder="Player" style="display:block;width:220px;
+          margin:0 auto 14px;background:#1a1a1a;color:#ddd;border:1px solid #822;
+          font:bold 16px monospace;padding:10px;text-align:center">
+        <button id="join-go" style="padding:12px 60px;background:#822;color:#fff;border:none;
+          font:bold 18px monospace;cursor:pointer">JOIN GAME</button>
+      </div>`;
+    root.appendChild(panel);
+    const input = panel.querySelector('#join-name') as HTMLInputElement;
+    const done = () => {
+      try {
+        localStorage.setItem('doomcraft.playerName', input.value.trim().slice(0, 12));
+      } catch {
+        // ignore
+      }
+      panel.remove();
+      resolve();
+    };
+    (panel.querySelector('#join-go') as HTMLButtonElement).onclick = done;
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') done();
+    });
+    input.focus();
+  });
+}
+
 export async function runGame(root: HTMLElement, startMap: number, net?: NetOptions): Promise<void> {
+  // First-time joiners via a direct link never saw the menu's NAME field
+  if (net?.room) {
+    let stored = '';
+    try {
+      stored = localStorage.getItem('doomcraft.playerName') ?? '';
+    } catch {
+      // ignore
+    }
+    if (!stored) await promptForName(root);
+  }
+
   // Joiners resolve quietly (no picker): whatever the host plays gets
   // transferred through the relay if we don't already have it.
   let wadBuffer = await loadWadBuffer(root, { quiet: !!net?.room, multiplayer: !!net });
