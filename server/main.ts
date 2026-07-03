@@ -284,6 +284,8 @@ wss.on('connection', (ws) => {
           ws.send(JSON.stringify({ t: 'error', reason: 'WAD transfer failed (hash mismatch)' }));
         }
       }
+    } else if (msg.t === 'ping') {
+      ws.send(JSON.stringify({ t: 'pong', n: (msg as { n?: number }).n }));
     } else if (msg.t === 'begin') {
       // host starts the game once 2-4 players are present and ready
       if (room && slot === 0 && !room.started) {

@@ -293,6 +293,38 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
   const hud = new HudView(store, wad, root);
   const automap = new Automap(root);
 
+  // --- debug panel (I key or ?debug): live transport/perf stats, plus a
+  // compact JSON dump to the console every 5s while open (for sharing)
+  const debug = document.createElement('div');
+  debug.style.cssText =
+    'position:fixed;top:8px;right:8px;color:#8f8;display:none;text-align:left;' +
+    'font:12px monospace;text-shadow:1px 1px 0 #000;pointer-events:none;white-space:pre;' +
+    'background:rgba(0,0,0,0.55);padding:8px 10px;z-index:6';
+  root.appendChild(debug);
+  let debugOn = new URLSearchParams(location.search).has('debug');
+  debug.style.display = debugOn ? 'block' : 'none';
+  const frameGaps: number[] = [];
+  let advancesInWindow = 0;
+  let stallMax = 0;
+  let lastDebugDump = 0;
+  let lastDebugPaint = performance.now();
+  let resyncCount = 0;
+
+  function debugSnapshot(now: number, fpsWindowMs: number): Record<string, unknown> {
+    const gaps = [...frameGaps].sort((a, b) => a - b);
+    const mean = gaps.reduce((a, b) => a + b, 0) / (gaps.length || 1);
+    return {
+      fps: Math.round(1000 / (mean || 1)),
+      gapP95: gaps.length ? Number(gaps[Math.floor(gaps.length * 0.95)]!.toFixed(1)) : null,
+      gapMax: gaps.length ? Number(gaps[gaps.length - 1]!.toFixed(1)) : null,
+      ticsPerSec: Math.round((advancesInWindow / fpsWindowMs) * 1000),
+      stallMaxMs: Math.round(stallMax),
+      map: mapNumber,
+      resyncs: resyncCount,
+      ...(netClient ? netClient.stats() : { solo: true }),
+    };
+  }
+
   // transient top-center announcements (player left, etc.)
   const toasts = document.createElement('div');
   toasts.style.cssText =
@@ -322,6 +354,9 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
       automap.zoom(1.25);
     } else if (automap.visible && (e.code === 'Minus' || e.code === 'NumpadSubtract')) {
       automap.zoom(1 / 1.25);
+    } else if (e.code === 'KeyI') {
+      debugOn = !debugOn;
+      debug.style.display = debugOn ? 'block' : 'none';
     }
   });
   const overlay = document.createElement('div');
@@ -610,6 +645,7 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
       // systematic determinism bug — give up rather than thrash.
       if (now - lastResyncAt >= 30000) {
         lastResyncAt = now;
+        resyncCount++;
         resyncFromLog();
       }
     }
@@ -645,11 +681,13 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
           netClient.advance(sim);
           postTic();
           lastAdvance = now;
+          advancesInWindow++;
         }
       } else {
         sim.runTic([input.buildTicCmd()]);
         postTic();
         lastAdvance = now;
+        advancesInWindow++;
       }
       acc -= TIC_MS;
       ran++;
@@ -675,6 +713,24 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
 
   renderer.setAnimationLoop(() => {
     const now = performance.now();
+    if (debugOn) {
+      frameGaps.push(now - lastFrame);
+      stallMax = Math.max(stallMax, now - lastAdvance);
+      if (now - lastDebugPaint > 500 && frameGaps.length > 5) {
+        const s = debugSnapshot(now, now - lastDebugPaint);
+        lastDebugPaint = now;
+        debug.textContent = Object.entries(s)
+          .map(([k, v]) => `${k}: ${JSON.stringify(v)}`)
+          .join('\n');
+        if (now - lastDebugDump > 5000) {
+          lastDebugDump = now;
+          console.info('[doomcraft-debug]', JSON.stringify(s));
+        }
+        frameGaps.length = 0;
+        advancesInWindow = 0;
+        stallMax = 0;
+      }
+    }
     lastFrame = now;
 
     if (netClient && netClient.peerLeft) {

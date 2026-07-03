@@ -85,6 +85,11 @@ export class NetClient {
   /** UI callback: a player left mid-game */
   onPlayerLeft: ((slot: number) => void) | null = null;
 
+  /** smoothed ws relay round-trip, ms (-1 until measured) */
+  rttMs = -1;
+  private pingN = 0;
+  private pingSent = new Map<number, number>();
+
   private wadIncoming: { buf: Uint8Array; got: number } | null = null;
   private receivedWad: ArrayBuffer | null = null;
   private onWadProgress: ((got: number, total: number) => void) | null = null;
@@ -126,6 +131,15 @@ export class NetClient {
           this.slot = msg.slot;
           this.playerCount = msg.players ?? 2;
           this.names = msg.names ?? [];
+          // relay RTT probe (debug panel; ~2s cadence, trivial traffic)
+          setInterval(() => {
+            if (this.ws?.readyState === WebSocket.OPEN) {
+              const n = this.pingN++;
+              this.pingSent.set(n, performance.now());
+              this.ws.send(JSON.stringify({ t: 'ping', n }));
+              if (this.pingSent.size > 10) this.pingSent.clear(); // lost pings
+            }
+          }, 2000);
           // RTC cmd transport is 2-player only for now (3-4 players run
           // relay-first; a per-pair mesh is future work). The host offers
           // the persistent in-game cmd channel.
@@ -150,6 +164,13 @@ export class NetClient {
           void this.onRtcSignal(msg.d, msg.from ?? 0);
         } else if (msg.t === 'error') {
           reject(new Error(msg.reason));
+        } else if (msg.t === 'pong') {
+          const t0 = this.pingSent.get(msg.n);
+          if (t0 !== undefined) {
+            this.pingSent.delete(msg.n);
+            const rtt = performance.now() - t0;
+            this.rttMs = this.rttMs < 0 ? rtt : this.rttMs * 0.7 + rtt * 0.3;
+          }
         } else if (msg.t === 'playerLeft') {
           // dropout-and-continue: survivors drop the player at the
           // agreed tic (clamped forward if we already simulated past it
@@ -617,6 +638,23 @@ export class NetClient {
       }
     }
     return { yaw, pitch };
+  }
+
+  /** Snapshot of transport health for the debug panel. */
+  stats(): Record<string, unknown> {
+    return {
+      slot: this.slot,
+      players: this.playerCount,
+      path: this.path,
+      simTic: this.simTic,
+      sendTic: this.sendTic,
+      ahead: this.bufferedAhead(),
+      rttMs: this.rttMs < 0 ? null : Math.round(this.rttMs),
+      rtcHighTic: this.highTicRtc,
+      relayHighTic: this.highTicRelay,
+      departures: [...this.departures.entries()],
+      desyncTic: this.desync,
+    };
   }
 
   /** Clear desync state after a successful replay resync. */
