@@ -15,6 +15,7 @@
 
 import { simChecksum } from '../sim/checksum.ts';
 import type { DoomSim } from '../sim/sim.ts';
+import { getCachedWad } from '../wad/load.ts';
 import { hashWad } from '../wad/wad.ts';
 import { decodeCmd, emptyCmd, encodeCmd, TICCMD_BYTES, type TicCmd } from '../sim/ticcmd.ts';
 
@@ -156,7 +157,18 @@ export class NetClient {
         } else if (msg.t === 'peerNeedsWad') {
           if (opts.wadProvider) void this.transferWad(opts.wadProvider(), msg.slot ?? 1);
         } else if (msg.t === 'awaitWad') {
-          this.onWadProgress?.(0, 0); // "waiting for host…"
+          // the host plays a different WAD — check our library by hash
+          // before asking for a multi-MB transfer
+          void getCachedWad(msg.hash ?? '').then((cached) => {
+            if (cached) {
+              console.info('WAD transfer: skipped — host WAD found in browser library');
+              this.receivedWad = cached;
+              this.ws?.send(JSON.stringify({ t: 'wadReady', wadHash: msg.hash }));
+            } else {
+              this.onWadProgress?.(0, 0); // "waiting for host…"
+              this.ws?.send(JSON.stringify({ t: 'needWad' }));
+            }
+          });
         } else if (msg.t === 'roster') {
           this.names = msg.names ?? this.names;
           opts.onRoster?.(msg.count, msg.ready, msg.names ?? []);

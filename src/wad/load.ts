@@ -53,6 +53,12 @@ async function idbGet(hash: string): Promise<CachedWad | null> {
   });
 }
 
+/** Fetch a WAD from the browser library by hash (host-hash matching). */
+export async function getCachedWad(hash: string): Promise<ArrayBuffer | null> {
+  const hit = await idbGet(hash).catch(() => null);
+  return hit && looksLikeDoom2(hit.buf) ? hit.buf : null;
+}
+
 /** Save a WAD into the browser library; returns its hash. */
 export async function cacheWad(buf: ArrayBuffer, name: string): Promise<string> {
   const hash = await hashWad(buf);

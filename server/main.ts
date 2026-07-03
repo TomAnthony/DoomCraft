@@ -261,13 +261,17 @@ wss.on('connection', (ws) => {
       slot = free;
       ws.send(JSON.stringify({ t: 'joined', slot: free }));
       if (!r.ready[free]) {
-        // joiner lacks the host's WAD: host streams it (RTC or relay),
-        // joiner confirms with wadReady when assembled
-        r.players[0]!.send(JSON.stringify({ t: 'peerNeedsWad', slot: free }));
-        ws.send(JSON.stringify({ t: 'awaitWad' }));
-        console.log(`room ${r.code}: transferring WAD to slot ${free}`);
+        // hash mismatch: tell the joiner the host's hash first — they
+        // check their IndexedDB library and reply wadReady (cache hit,
+        // no transfer) or needWad (host streams it, RTC or relay)
+        ws.send(JSON.stringify({ t: 'awaitWad', hash: r.wadHash }));
       }
       roster(r);
+    } else if (msg.t === 'needWad') {
+      if (room && slot > 0 && !room.ready[slot]) {
+        room.players[0]?.send(JSON.stringify({ t: 'peerNeedsWad', slot }));
+        console.log(`room ${room.code}: transferring WAD to slot ${slot}`);
+      }
     } else if (msg.t === 'rtc') {
       // WebRTC signalling: addressed to a slot; server stamps the sender
       if (!room) return;

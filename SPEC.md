@@ -180,11 +180,14 @@ player positions *(planned)*.
 - **Server** (`server/main.ts`): single Node process — WebSocket relay with
   4-character room codes plus static hosting of `dist/`. JSON lobby
   (create/join); the game starts automatically when the second player
-  joins; WAD hash compared at join — on mismatch the host streams its
-  WAD to the joiner over a direct WebRTC DataChannel (64KB chunks;
-  server only forwards the SDP/ICE signalling), falling back to
-  256KB chunks through the ws relay if no direct path forms within 8s;
-  verified by hash, cached in IndexedDB, then start; in-game it relays
+  joins; WAD hash compared at join — on mismatch the server sends the
+  joiner the host's hash first, and the joiner checks their IndexedDB
+  library (keyed by SHA-256) for it: a hit skips the transfer entirely
+  (wadReady straight back); otherwise (needWad) the host streams its
+  WAD over a direct WebRTC DataChannel (64KB chunks; server only
+  forwards the SDP/ICE signalling), falling back to 256KB chunks
+  through the ws relay if no direct path forms within 8s; verified by
+  hash, cached in IndexedDB for next time, then start; in-game it relays
   opaque binary frames and holds no game state.
 - **Joining**: creator opens `/?server=ws://host:8666&map=N` and shares the
   room code; the other player opens `/?server=ws://host:8666&room=CODE`.
