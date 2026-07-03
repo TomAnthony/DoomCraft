@@ -77,6 +77,7 @@ const http = createServer(async (req, res) => {
   try {
     let path = normalize(decodeURIComponent(req.url?.split('?')[0] ?? '/'));
     if (path === '/' || path.includes('..')) path = '/index.html';
+    if (path === '/play') path = '/play.html'; // game launch screen
     let file: Buffer;
     if (path === '/freedm.wad') {
       file = await readFile(join(ROOT, 'freedm.wad'));

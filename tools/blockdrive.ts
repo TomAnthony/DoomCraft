@@ -9,7 +9,7 @@ const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 const errors: string[] = [];
 page.on('pageerror', (err) => errors.push(String(err)));
-await page.goto('http://localhost:5173/?map=1');
+await page.goto('http://localhost:5173/play?map=1');
 await page.waitForTimeout(3000);
 
 // select the block gun

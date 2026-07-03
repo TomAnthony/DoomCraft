@@ -69,14 +69,15 @@ npm start           # builds then serves game + WAD + relay on :8666
 (`npm run server` alone serves the existing `dist/` without rebuilding —
 the server warns on startup if that build is older than `src/`.)
 
-1. Both players open `http://<host>:8666/` — a start menu offers
-   SOLO GAME, HOST MULTIPLAYER (with a map picker), and JOIN GAME.
+1. `http://<host>:8666/` is a static introduction page; the PLAY button
+   (or `/play` directly) opens the start menu — SOLO GAME, HOST
+   MULTIPLAYER (with map/WAD pickers), and JOIN GAME.
 2. The host clicks HOST MULTIPLAYER and sends the invite link (COPY
    button) or the 4-letter room code.
 3. The friend pastes the link, or types the code into JOIN GAME.
 4. The game starts the moment player 2 joins.
 
-Direct URLs still work: `/?map=7` (solo), `/?host&map=7`, `/?room=CODE`.
+Direct URLs: `/play?map=7` (solo), `/play?host&map=7`, `/play?room=CODE`.
 
 ### Game data (WADs)
 

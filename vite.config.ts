@@ -5,7 +5,15 @@ export default defineConfig({
   // Dev serves them directly: /DOOM2.WAD and /freedm.wad by name, plus
   // /wad/<name> as the dev equivalent of the production server's
   // registered-WAD route (so ?wad=DOOM2.WAD works in dev too).
-  publicDir: false,
+  publicDir: 'public',
+  build: {
+    rollupOptions: {
+      input: {
+        index: 'index.html', // static intro page at /
+        play: 'play.html', // the game, served at /play
+      },
+    },
+  },
   server: {
     port: 5173,
   },
@@ -26,6 +34,13 @@ export default defineConfig({
             res.end(`${name} not found in project root`);
           }
         };
+        // clean /play URL (the prod server does the same mapping)
+        server.middlewares.use((req, _res, next) => {
+          if (req.url?.split('?')[0] === '/play') {
+            req.url = '/play.html' + (req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '');
+          }
+          next();
+        });
         server.middlewares.use('/DOOM2.WAD', (_req, res) => void serveWad('DOOM2.WAD', res));
         server.middlewares.use('/freedm.wad', (_req, res) => void serveWad('freedm.wad', res));
         server.middlewares.use('/wad', (req, res) =>

@@ -3,7 +3,7 @@
 
 import { chromium } from 'playwright';
 
-const path = process.argv[2] ?? '/';
+const path = process.argv[2] ?? '/play?map=1';
 const outfile = process.argv[3] ?? '/tmp/doomcraft.png';
 const waitMs = Number(process.argv[4] ?? 2500);
 

@@ -110,8 +110,8 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
         const sameOrigin =
           net.url === `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
         const joinUrl = sameOrigin
-          ? `${location.origin}/?room=${room}`
-          : `${location.origin}/?server=${encodeURIComponent(net.url)}&room=${room}`;
+          ? `${location.origin}${location.pathname}?room=${room}`
+          : `${location.origin}${location.pathname}?server=${encodeURIComponent(net.url)}&room=${room}`;
         status.innerHTML = `
           <div style="text-align:center">
             <div style="color:#a66;font:13px monospace;margin-bottom:8px">ROOM CODE</div>

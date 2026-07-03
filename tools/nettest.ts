@@ -18,7 +18,7 @@ for (const [name, page] of [['A', pageA], ['B', pageB]] as const) {
 }
 
 // Player A creates the room.
-await pageA.goto(`${base}/?server=${encodeURIComponent(relay)}&map=1`);
+await pageA.goto(`${base}/play?server=${encodeURIComponent(relay)}&map=1`);
 await pageA.waitForSelector('#lobby-url', { timeout: 15000 });
 const joinUrl = await pageA.inputValue('#lobby-url');
 const room = /room=([A-Z]{4})/.exec(joinUrl)?.[1];
@@ -26,7 +26,7 @@ if (!room) throw new Error(`no room code in invite url: ${joinUrl}`);
 console.log(`room ${room} created`);
 
 // Player B joins.
-await pageB.goto(`${base}/?server=${encodeURIComponent(relay)}&room=${room}`);
+await pageB.goto(`${base}/play?server=${encodeURIComponent(relay)}&room=${room}`);
 await pageB.waitForTimeout(4000);
 
 // Drive both players for ~8 seconds.

@@ -3,15 +3,142 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>DoomCraft</title>
+    <title>DoomCraft — Doom 2 deathmatch with Minecraft blocks, in your browser</title>
+    <meta
+      name="description"
+      content="DoomCraft is a browser-based Doom 2 clone with an 8th weapon that places and removes Minecraft-style blocks. Solo or 2-player online deathmatch."
+    />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icon-32.png" />
+    <link rel="apple-touch-icon" href="/icon-180.png" />
     <style>
-      html, body { margin: 0; padding: 0; background: #111; color: #ddd;
-                   font-family: monospace; height: 100%; overflow: hidden; }
-      #app { height: 100%; }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        min-height: 100%;
+      }
+      body {
+        background: #000 radial-gradient(ellipse 90% 60% at 50% 0%, #2a0f0f 0%, #000 70%);
+        color: #cfc4b8;
+        font-family: 'Courier New', Courier, monospace;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 48px 24px 32px;
+        text-align: center;
+      }
+      main {
+        max-width: 640px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+      .logo {
+        width: min(480px, 90vw);
+        height: auto;
+        filter: drop-shadow(0 0 24px rgba(255, 60, 0, 0.25));
+        margin-bottom: 36px;
+      }
+      p {
+        font-size: 15px;
+        line-height: 1.7;
+        margin: 0 0 18px;
+      }
+      a {
+        color: #e88;
+        text-decoration: none;
+        border-bottom: 1px dotted #a44;
+      }
+      a:hover {
+        color: #fff;
+        border-bottom-color: #e33;
+      }
+      .play {
+        display: inline-block;
+        margin: 30px 0 10px;
+        padding: 18px 72px;
+        background: linear-gradient(#a22, #711);
+        border: 2px solid #400;
+        border-radius: 3px;
+        color: #fff;
+        font: bold 26px 'Courier New', Courier, monospace;
+        letter-spacing: 6px;
+        text-decoration: none;
+        text-shadow: 2px 2px 0 #400;
+        box-shadow: 0 0 28px rgba(255, 40, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+        transition: transform 0.05s, box-shadow 0.15s;
+      }
+      .play:hover {
+        background: linear-gradient(#c33, #822);
+        box-shadow: 0 0 42px rgba(255, 60, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+        color: #fff;
+      }
+      .play:active {
+        transform: translateY(2px);
+      }
+      hr {
+        width: 100%;
+        max-width: 640px;
+        border: none;
+        border-top: 1px solid #3a1a1a;
+        margin: 44px 0 28px;
+      }
+      footer {
+        max-width: 640px;
+        color: #6d635a;
+        font-size: 12px;
+        line-height: 1.7;
+      }
+      footer p {
+        font-size: 12px;
+        margin: 0 0 10px;
+      }
+      footer a {
+        color: #8d7d6d;
+      }
     </style>
   </head>
   <body>
-    <div id="app"></div>
-    <script type="module" src="/src/main.ts"></script>
+    <main>
+      <img class="logo" src="/logo.png" alt="DoomCraft" width="480" height="160" />
+
+      <p>
+        DoomCraft is a browser-based Doom&nbsp;2 clone, with an added 8th weapon that places and
+        removes Minecraft-style blocks.
+      </p>
+
+      <p>
+        You can play Solo, or multiplayer Deathmatch. The
+        <a href="https://freedoom.github.io/">Freedoom</a> WAD is included by default for levels,
+        or you can upload a WAD (which will be cached inside your browser for future games).
+      </p>
+
+      <p>
+        To host a multiplayer game just click the Host game button and share the generated URL
+        with another player &mdash; the WAD you select will distribute to the other player. You
+        can opt out of the Minecraft-style block gun if you want.
+      </p>
+
+      <a class="play" href="/play">PLAY</a>
+    </main>
+
+    <hr />
+
+    <footer>
+      <p>
+        Project source code:
+        <a href="https://github.com/TomAnthony/DoomCraft">github.com/TomAnthony/DoomCraft</a>
+      </p>
+      <p>
+        DoomCraft is an unofficial, fan-made project. It is not affiliated with, endorsed by, or
+        sponsored by id Software, ZeniMax Media, Mojang Studios, or Microsoft.
+      </p>
+      <p>DOOM is a trademark of id Software LLC in the United States and/or other countries.</p>
+      <p>Minecraft is a trademark of Mojang AB.</p>
+      <p>All trademarks are the property of their respective owners.</p>
+    </footer>
   </body>
 </html>
