@@ -29,7 +29,7 @@ import type { DoomSim } from '../sim/sim.ts';
 import { textureHeights } from '../sim/specials/floors.ts';
 import { PlayerState } from '../sim/defs.ts';
 import { emptyCmd } from '../sim/ticcmd.ts';
-import { loadWadBuffer } from '../wad/load.ts';
+import { cacheWad, loadWadBuffer } from '../wad/load.ts';
 import { listMaps, readMap, type MapData } from '../wad/maps.ts';
 import { hashWad, WadFile } from '../wad/wad.ts';
 
@@ -80,12 +80,9 @@ export interface NetOptions {
 }
 
 export async function runGame(root: HTMLElement, startMap: number, net?: NetOptions): Promise<void> {
-  const wadBuffer = await loadWadBuffer(root);
-  const wad = new WadFile(wadBuffer);
-  const maps = listMaps(wad);
-  const store = new TextureStore(wad);
-  populateTextureHeights(store);
-  const audio = new AudioPlayer(wad);
+  // Joiners resolve quietly (no picker): whatever the host plays gets
+  // transferred through the relay if we don't already have it.
+  let wadBuffer = await loadWadBuffer(root, { quiet: !!net?.room });
 
   // --- lobby (netgame) -----------------------------------------------------
   let netClient: NetClient | null = null;
@@ -99,7 +96,7 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
     root.appendChild(status);
 
     netClient = new NetClient();
-    const hash = await hashWad(wadBuffer);
+    const hash = wadBuffer ? await hashWad(wadBuffer) : null;
     try {
       // surface the room code + a copyable invite link while waiting
       let shownRoom = '';
@@ -138,16 +135,40 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
         room: net.room,
         map: startMap,
         wadHash: hash,
+        wadProvider: () => wadBuffer!,
+        onWadProgress: (got, total) => {
+          shownRoom = '#wad'; // stop the invite-link poll overwriting us
+          status.textContent =
+            total === 0
+              ? 'Host is sending the game data…'
+              : `Receiving game data from host… ${(got / 1048576).toFixed(1)} / ${(total / 1048576).toFixed(1)} MB`;
+        },
       });
       clearInterval(poll);
       localSlot = lobby.slot;
       startMap = lobby.map;
+      if (lobby.receivedWad) {
+        wadBuffer = lobby.receivedWad;
+        void cacheWad(wadBuffer, 'from-host.wad'); // one-time: cached for next visit
+      }
     } catch (err) {
       status.textContent = `Netgame error: ${err instanceof Error ? err.message : String(err)}`;
       return;
     }
     status.remove();
   }
+
+  if (!wadBuffer) {
+    // solo/host without any resolvable WAD ends at the picker inside
+    // loadWadBuffer; reaching here means a joiner failed the transfer
+    root.textContent = 'No game data available.';
+    return;
+  }
+  const wad = new WadFile(wadBuffer);
+  const maps = listMaps(wad);
+  const store = new TextureStore(wad);
+  populateTextureHeights(store);
+  const audio = new AudioPlayer(wad);
 
   const renderer = new THREE.WebGLRenderer({ antialias: false });
   // Doom's chunky pixels don't need Retina density, and 1x cuts GPU load

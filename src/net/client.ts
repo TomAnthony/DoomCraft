@@ -5,10 +5,14 @@
 
 import { simChecksum } from '../sim/checksum.ts';
 import type { DoomSim } from '../sim/sim.ts';
+import { hashWad } from '../wad/wad.ts';
 import { decodeCmd, emptyCmd, encodeCmd, TICCMD_BYTES, type TicCmd } from '../sim/ticcmd.ts';
 
 const MSG_CMD = 1;
 const MSG_CHECKSUM = 2;
+const MSG_WAD_META = 3;
+const MSG_WAD_CHUNK = 4;
+const WAD_CHUNK_SIZE = 256 * 1024;
 
 export const INPUT_DELAY = 3; // tics (~86ms)
 
@@ -17,6 +21,18 @@ export interface LobbyResult {
   map: number;
   skill: number;
   room: string;
+  /** set when the host transferred its WAD to us during the lobby */
+  receivedWad?: ArrayBuffer;
+}
+
+export interface ConnectOptions {
+  room?: string;
+  map?: number;
+  /** null = we have no WAD; the host will send one */
+  wadHash: string | null;
+  /** host side: supplies the bytes to stream on peerNeedsWad */
+  wadProvider?: () => ArrayBuffer;
+  onWadProgress?: (got: number, total: number) => void;
 }
 
 export class NetClient {
@@ -34,8 +50,13 @@ export class NetClient {
   desync: number | null = null;
   peerLeft = false;
 
+  private wadIncoming: { buf: Uint8Array; got: number } | null = null;
+  private receivedWad: ArrayBuffer | null = null;
+  private onWadProgress: ((got: number, total: number) => void) | null = null;
+
   /** Connect and run the lobby: create a room or join one. */
-  connect(url: string, opts: { room?: string; map?: number; wadHash: string }): Promise<LobbyResult> {
+  connect(url: string, opts: ConnectOptions): Promise<LobbyResult> {
+    this.onWadProgress = opts.onWadProgress ?? null;
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(url);
       ws.binaryType = 'arraybuffer';
@@ -58,7 +79,17 @@ export class NetClient {
           this.room = msg.room;
         } else if (msg.t === 'start') {
           this.slot = msg.slot;
-          resolve({ slot: msg.slot, map: msg.map, skill: msg.skill, room: this.room });
+          resolve({
+            slot: msg.slot,
+            map: msg.map,
+            skill: msg.skill,
+            room: this.room,
+            receivedWad: this.receivedWad ?? undefined,
+          });
+        } else if (msg.t === 'peerNeedsWad') {
+          if (opts.wadProvider) void this.sendWad(opts.wadProvider());
+        } else if (msg.t === 'awaitWad') {
+          this.onWadProgress?.(0, 0); // "waiting for host…"
         } else if (msg.t === 'error') {
           reject(new Error(msg.reason));
         } else if (msg.t === 'peerleft') {
@@ -68,13 +99,53 @@ export class NetClient {
     });
   }
 
+  /** Host side: stream the WAD to the joiner through the relay. */
+  private async sendWad(buf: ArrayBuffer): Promise<void> {
+    const ws = this.ws!;
+    const meta = new DataView(new ArrayBuffer(5));
+    meta.setUint8(0, MSG_WAD_META);
+    meta.setUint32(1, buf.byteLength, true);
+    ws.send(meta.buffer);
+    for (let off = 0; off < buf.byteLength; off += WAD_CHUNK_SIZE) {
+      // backpressure: don't queue the whole file into the socket buffer
+      while (ws.bufferedAmount > 4 * WAD_CHUNK_SIZE) {
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      const chunk = buf.slice(off, Math.min(off + WAD_CHUNK_SIZE, buf.byteLength));
+      const frame = new Uint8Array(5 + chunk.byteLength);
+      const view = new DataView(frame.buffer);
+      view.setUint8(0, MSG_WAD_CHUNK);
+      view.setUint32(1, off, true);
+      frame.set(new Uint8Array(chunk), 5);
+      ws.send(frame.buffer);
+    }
+  }
+
   private onBinary(view: DataView): void {
     const type = view.getUint8(0);
-    const tic = view.getUint32(1, true);
     if (type === MSG_CMD) {
-      this.cmds[this.slot ^ 1]!.set(tic, decodeCmd(view, 5));
+      this.cmds[this.slot ^ 1]!.set(view.getUint32(1, true), decodeCmd(view, 5));
     } else if (type === MSG_CHECKSUM) {
-      this.remoteChecksums.set(tic, view.getUint32(5, true));
+      this.remoteChecksums.set(view.getUint32(1, true), view.getUint32(5, true));
+    } else if (type === MSG_WAD_META) {
+      this.wadIncoming = {
+        buf: new Uint8Array(new ArrayBuffer(view.getUint32(1, true))),
+        got: 0,
+      };
+    } else if (type === MSG_WAD_CHUNK && this.wadIncoming) {
+      const off = view.getUint32(1, true);
+      const data = new Uint8Array(view.buffer, view.byteOffset + 5, view.byteLength - 5);
+      this.wadIncoming.buf.set(data, off);
+      this.wadIncoming.got += data.byteLength;
+      this.onWadProgress?.(this.wadIncoming.got, this.wadIncoming.buf.byteLength);
+      if (this.wadIncoming.got >= this.wadIncoming.buf.byteLength) {
+        const done = this.wadIncoming.buf.buffer as ArrayBuffer;
+        this.wadIncoming = null;
+        this.receivedWad = done;
+        void hashWad(done).then((wadHash) =>
+          this.ws?.send(JSON.stringify({ t: 'wadReady', wadHash })),
+        );
+      }
     }
   }
 

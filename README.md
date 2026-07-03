@@ -55,13 +55,24 @@ the server warns on startup if that build is older than `src/`.)
 
 Direct URLs still work: `/?map=7` (solo), `/?host&map=7`, `/?room=CODE`.
 
-If `DOOM2.WAD` is in the project root (next to `dist/`), the server
-serves it to both browsers — zero friction, but anyone with the URL
-can download it. To keep the WAD off the server entirely, simply don't
-upload it: players are then prompted to select their own local copy
-(validated, cached in the browser's IndexedDB — one-time per browser,
-never uploaded). The lobby hash check still requires both players'
-WADs to be identical. For
+### Game data (WADs)
+
+- **FreeDM is the built-in default**: `freedm.wad` in the project root
+  is freely distributable and always served at `/freedm.wad`. (FreeDM
+  is deathmatch-only — its maps contain no monsters.)
+- **The start menu has a GAME DATA selector**: server-offered WADs,
+  your browser's saved WADs, and UPLOAD A WAD… (uploads are validated
+  and cached in IndexedDB — local to your browser).
+- **Host→joiner transfer**: whatever the host plays, the joiner gets.
+  If the joiner's WAD hash doesn't match, the host's WAD streams to
+  them through the relay (progress shown), is verified by hash, and is
+  cached for next time. Joiners never need to pick anything.
+- **Private server WADs**: commercial WADs are NOT served unless you
+  register them: `npm run server -- --wad DOOM2.WAD:mysecret` serves
+  the file only at `/wad/mysecret`, invisible to the menu. Load it with
+  `?wad=mysecret` in the URL (the menu preserves the param when
+  hosting). In dev, vite serves `/DOOM2.WAD` from the project root as
+  the canonical default. For
 internet play, run it on a VPS or port-forward 8666. Behind TLS/a
 reverse proxy, the ws URL is derived automatically (wss on https).
 

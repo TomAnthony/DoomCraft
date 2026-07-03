@@ -1,49 +1,114 @@
-// WAD acquisition: fetch /DOOM2.WAD from the host if it serves one,
-// otherwise ask the player for their own copy (cached in IndexedDB so
-// it's a one-time step per browser). Lets a deployment keep the WAD
-// entirely off the server — nothing to download that you didn't bring.
+// WAD acquisition and browser-side WAD library.
+//
+// Resolution order:
+//   1. ?wad=<key>            — fetch /wad/<key> (server-registered via
+//                              --wad path:key; the key can be a secret)
+//   2. saved menu choice     — 'builtin:<name>' (fetch /<name>) or
+//                              'idb:<hash>' (browser library)
+//   3. /DOOM2.WAD            — dev-canonical convenience (vite serves it;
+//                              the production server does not)
+//   4. /freedm.wad           — freely-distributable default, served by
+//                              both dev and production servers
+//   5. interactive picker    — unless quiet (joiners skip it: the host
+//                              transfers its WAD through the relay)
+//
+// The library lives in IndexedDB keyed by SHA-256 hash; uploads and
+// host-transferred WADs land there so they're one-time per browser.
+
+import { hashWad } from './wad.ts';
 
 const DB_NAME = 'doomcraft';
-const STORE = 'files';
-const KEY = 'DOOM2.WAD';
+const STORE = 'wads';
+const CHOICE_KEY = 'doomcraft.wadChoice';
+
+export interface CachedWadInfo {
+  hash: string;
+  name: string;
+  size: number;
+}
+
+interface CachedWad extends CachedWadInfo {
+  buf: ArrayBuffer;
+}
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
-    req.onupgradeneeded = () => req.result.createObjectStore(STORE);
+    const req = indexedDB.open(DB_NAME, 2);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(STORE)) req.result.createObjectStore(STORE);
+    };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
 }
 
-async function idbGet(): Promise<ArrayBuffer | null> {
+async function idbGet(hash: string): Promise<CachedWad | null> {
   const db = await openDb();
   return new Promise((resolve) => {
-    const req = db.transaction(STORE).objectStore(STORE).get(KEY);
-    req.onsuccess = () => resolve(req.result instanceof ArrayBuffer ? req.result : null);
+    const req = db.transaction(STORE).objectStore(STORE).get(hash);
+    req.onsuccess = () => resolve((req.result as CachedWad | undefined) ?? null);
     req.onerror = () => resolve(null);
   });
 }
 
-async function idbPut(buf: ArrayBuffer): Promise<void> {
+/** Save a WAD into the browser library; returns its hash. */
+export async function cacheWad(buf: ArrayBuffer, name: string): Promise<string> {
+  const hash = await hashWad(buf);
   const db = await openDb();
-  return new Promise((resolve) => {
+  await new Promise<void>((resolve) => {
     const tx = db.transaction(STORE, 'readwrite');
-    tx.objectStore(STORE).put(buf, KEY);
+    tx.objectStore(STORE).put({ hash, name, size: buf.byteLength, buf } satisfies CachedWad, hash);
     tx.oncomplete = () => resolve();
     tx.onerror = () => resolve();
   });
+  return hash;
 }
 
-function looksLikeDoom2(buf: ArrayBuffer): boolean {
+/** List the browser WAD library (metadata only). */
+export async function listCachedWads(): Promise<CachedWadInfo[]> {
+  const db = await openDb();
+  return new Promise((resolve) => {
+    const out: CachedWadInfo[] = [];
+    const req = db.transaction(STORE).objectStore(STORE).openCursor();
+    req.onsuccess = () => {
+      const cur = req.result;
+      if (cur) {
+        const { hash, name, size } = cur.value as CachedWad;
+        out.push({ hash, name, size });
+        cur.continue();
+      } else {
+        resolve(out);
+      }
+    };
+    req.onerror = () => resolve(out);
+  });
+}
+
+export function getWadChoice(): string | null {
+  try {
+    return localStorage.getItem(CHOICE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setWadChoice(choice: string): void {
+  try {
+    localStorage.setItem(CHOICE_KEY, choice);
+  } catch {
+    // ignore
+  }
+}
+
+/** Doom2-format sanity check: WAD magic + a MAP01 directory entry. */
+export function looksLikeDoom2(buf: ArrayBuffer): boolean {
   if (buf.byteLength < 12) return false;
   const magic = new TextDecoder().decode(new Uint8Array(buf, 0, 4));
   if (magic !== 'IWAD' && magic !== 'PWAD') return false;
-  // cheap MAP01 scan of the directory (full parse happens later anyway)
   const view = new DataView(buf);
   const count = view.getInt32(4, true);
   const dirofs = view.getInt32(8, true);
-  if (dirofs < 0 || dirofs + count * 16 > buf.byteLength) return false;
+  if (dirofs < 0 || count < 0 || dirofs + count * 16 > buf.byteLength) return false;
   const bytes = new Uint8Array(buf);
   for (let i = 0; i < count; i++) {
     const o = dirofs + i * 16 + 8;
@@ -57,7 +122,19 @@ function looksLikeDoom2(buf: ArrayBuffer): boolean {
   return false;
 }
 
-function pickWad(root: HTMLElement): Promise<ArrayBuffer> {
+async function tryFetch(url: string): Promise<ArrayBuffer | null> {
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) return null;
+    const buf = await resp.arrayBuffer();
+    return looksLikeDoom2(buf) ? buf : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Interactive drop/browse picker; stores the pick in the library. */
+export function pickWad(root: HTMLElement): Promise<ArrayBuffer> {
   return new Promise((resolve) => {
     const panel = document.createElement('div');
     panel.style.cssText =
@@ -65,15 +142,15 @@ function pickWad(root: HTMLElement): Promise<ArrayBuffer> {
       'font-family:monospace;background:radial-gradient(ellipse at center,#2a0f0f 0%,#000 75%);z-index:20';
     panel.innerHTML = `
       <div style="text-align:center;max-width:440px">
-        <div style="color:#e33;font:bold 28px monospace;margin-bottom:12px">DOOM2.WAD NEEDED</div>
+        <div style="color:#e33;font:bold 28px monospace;margin-bottom:12px">WAD NEEDED</div>
         <div style="color:#a66;font:14px monospace;line-height:1.5;margin-bottom:22px">
-          This server doesn't distribute the game data.<br>
-          Select your own DOOM2.WAD — it stays in this browser<br>
-          (cached locally, never uploaded anywhere).
+          Select a Doom 2-format WAD (e.g. DOOM2.WAD).<br>
+          It stays in this browser — cached locally, never uploaded
+          anywhere except to your game peer.
         </div>
         <div id="wad-drop" style="border:2px dashed #822;padding:34px 20px;color:#ddd;
           font:bold 15px monospace;cursor:pointer;background:#1a1a1a">
-          DROP DOOM2.WAD HERE<br>
+          DROP A WAD HERE<br>
           <span style="color:#a66;font-weight:normal;font-size:12px">or click to browse</span>
         </div>
         <div id="wad-err" style="color:#e33;font:13px monospace;margin-top:12px;min-height:16px"></div>
@@ -92,10 +169,11 @@ function pickWad(root: HTMLElement): Promise<ArrayBuffer> {
       if (!file) return;
       const buf = await file.arrayBuffer();
       if (!looksLikeDoom2(buf)) {
-        err.textContent = 'That does not look like DOOM2.WAD (no MAP01 found).';
+        err.textContent = 'Not a Doom 2-format WAD (no MAP01 found).';
         return;
       }
-      await idbPut(buf);
+      const hash = await cacheWad(buf, file.name);
+      setWadChoice(`idb:${hash}`);
       panel.remove();
       resolve(buf);
     };
@@ -114,18 +192,38 @@ function pickWad(root: HTMLElement): Promise<ArrayBuffer> {
   });
 }
 
-/** Server copy first, then browser cache, then ask the player. */
-export async function loadWadBuffer(root: HTMLElement): Promise<ArrayBuffer> {
-  try {
-    const resp = await fetch('/DOOM2.WAD');
-    if (resp.ok) {
-      const buf = await resp.arrayBuffer();
-      if (looksLikeDoom2(buf)) return buf;
-    }
-  } catch {
-    // no server copy — fall through
+/**
+ * Resolve the WAD to play. quiet mode (joiners) returns null instead of
+ * showing the picker — the netgame lobby transfers the host's WAD.
+ */
+export async function loadWadBuffer(
+  root: HTMLElement,
+  opts: { quiet?: boolean } = {},
+): Promise<ArrayBuffer | null> {
+  // 1. explicit server key (possibly secret)
+  const key = new URLSearchParams(location.search).get('wad');
+  if (key) {
+    const buf = await tryFetch(`/wad/${encodeURIComponent(key)}`);
+    if (buf) return buf;
   }
-  const cached = await idbGet().catch(() => null);
-  if (cached && looksLikeDoom2(cached)) return cached;
+
+  // 2. saved menu choice
+  const choice = getWadChoice();
+  if (choice?.startsWith('idb:')) {
+    const hit = await idbGet(choice.slice(4)).catch(() => null);
+    if (hit && looksLikeDoom2(hit.buf)) return hit.buf;
+  } else if (choice?.startsWith('builtin:')) {
+    const buf = await tryFetch(`/${encodeURIComponent(choice.slice(8))}`);
+    if (buf) return buf;
+  }
+
+  // 3. dev-canonical DOOM2.WAD, 4. bundled freedm
+  const dev = await tryFetch('/DOOM2.WAD');
+  if (dev) return dev;
+  const freedm = await tryFetch('/freedm.wad');
+  if (freedm) return freedm;
+
+  // 5. ask
+  if (opts.quiet) return null;
   return pickWad(root);
 }

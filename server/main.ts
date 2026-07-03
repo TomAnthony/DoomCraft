@@ -1,17 +1,40 @@
 // DoomCraft relay server: WebSocket lobby with 4-char room codes plus
 // static hosting of the built client. Holds no game state — after start
-// it relays opaque binary frames between the two peers.
+// it relays opaque binary frames between the two peers (including the
+// host→joiner WAD transfer, which is just binary frames to the relay).
 //
-// Usage: node --experimental-strip-types server/main.ts [port]
+// Usage: node --experimental-strip-types server/main.ts [port] [--wad path[:key]]...
+//
+// WAD serving: freedm.wad from the project root is always served at
+// /freedm.wad (it's freely distributable). Additional WADs are only
+// served when registered with --wad, at /wad/<key> — the key defaults
+// to the file's basename but can be any string, so a non-guessable key
+// acts as a private handle (e.g. --wad DOOM2.WAD:s3cret → ?wad=s3cret).
+// Nothing else from the project root is reachable.
 
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { extname, join, normalize } from 'node:path';
+import { basename, extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
 
-const PORT = Number(process.argv[2] ?? process.env.PORT ?? 8666);
+const args = process.argv.slice(2);
+const PORT = Number(args.find((a) => /^\d+$/.test(a)) ?? process.env.PORT ?? 8666);
 const DIST = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'dist');
+const ROOT = join(DIST, '..');
+
+/** url key → filesystem path, from --wad path[:key] */
+const servedWads = new Map<string, string>();
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === '--wad' && args[i + 1]) {
+    const spec = args[++i]!;
+    const sep = spec.lastIndexOf(':');
+    const path = sep > 0 ? spec.slice(0, sep) : spec;
+    const key = sep > 0 ? spec.slice(sep + 1) : basename(path);
+    servedWads.set(key, join(ROOT, path));
+    console.log(`serving ${path} at /wad/${key}`);
+  }
+}
 
 interface Room {
   code: string;
@@ -22,6 +45,13 @@ interface Room {
 }
 
 const rooms = new Map<string, Room>();
+
+function start(r: Room): void {
+  for (let i = 0; i < 2; i++) {
+    r.players[i]!.send(JSON.stringify({ t: 'start', map: r.map, skill: r.skill, slot: i }));
+  }
+  console.log(`room ${r.code} started`);
+}
 
 function makeCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -42,14 +72,18 @@ const MIME: Record<string, string> = {
 
 const http = createServer(async (req, res) => {
   try {
-    let path = normalize(req.url?.split('?')[0] ?? '/');
+    let path = normalize(decodeURIComponent(req.url?.split('?')[0] ?? '/'));
     if (path === '/' || path.includes('..')) path = '/index.html';
-    // The WAD lives in the project root (never in dist/); serving it here
-    // means players don't each need a local copy — one host, one URL.
-    const file =
-      path === '/DOOM2.WAD'
-        ? await readFile(join(DIST, '..', 'DOOM2.WAD'))
-        : await readFile(join(DIST, path));
+    let file: Buffer;
+    if (path === '/freedm.wad') {
+      file = await readFile(join(ROOT, 'freedm.wad'));
+    } else if (path.startsWith('/wad/')) {
+      const target = servedWads.get(path.slice(5));
+      if (!target) throw new Error('unregistered wad');
+      file = await readFile(target);
+    } else {
+      file = await readFile(join(DIST, path));
+    }
     res.writeHead(200, { 'Content-Type': MIME[extname(path)] ?? 'application/octet-stream' });
     res.end(file);
   } catch {
@@ -102,18 +136,26 @@ wss.on('connection', (ws) => {
         ws.send(JSON.stringify({ t: 'error', reason: 'room full' }));
         return;
       }
-      if (r.wadHash && msg.wadHash && r.wadHash !== msg.wadHash) {
-        ws.send(JSON.stringify({ t: 'error', reason: 'WAD mismatch — both players need identical DOOM2.WAD files' }));
-        return;
-      }
       r.players[1] = ws;
       room = r;
       slot = 1;
-      // both present: start
-      for (let i = 0; i < 2; i++) {
-        r.players[i]!.send(JSON.stringify({ t: 'start', map: r.map, skill: r.skill, slot: i }));
+      if (msg.wadHash === r.wadHash) {
+        start(r);
+      } else {
+        // joiner lacks the host's WAD: host streams it through the relay
+        // (binary frames), joiner confirms with wadReady when assembled
+        r.players[0]!.send(JSON.stringify({ t: 'peerNeedsWad' }));
+        ws.send(JSON.stringify({ t: 'awaitWad' }));
+        console.log(`room ${r.code}: transferring WAD to joiner`);
       }
-      console.log(`room ${r.code} started`);
+    } else if (msg.t === 'wadReady') {
+      if (room && slot === 1) {
+        if (msg.wadHash === room.wadHash) {
+          start(room);
+        } else {
+          ws.send(JSON.stringify({ t: 'error', reason: 'WAD transfer failed (hash mismatch)' }));
+        }
+      }
     }
   });
 

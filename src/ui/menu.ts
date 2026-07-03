@@ -1,6 +1,13 @@
 // Start menu: shown at the bare URL. Solo play, host a game, or join
 // with a room code — navigation happens via URL params so links stay
 // shareable and the game code paths stay unchanged.
+//
+// The GAME DATA selector covers WADs the server offers (freedm.wad is
+// always public; DOOM2.WAD appears only in dev where vite serves it),
+// the browser's own library (uploads + host-transferred WADs), and an
+// upload option. Joining ignores it — you play whatever the host plays.
+
+import { cacheWad, getWadChoice, listCachedWads, looksLikeDoom2, setWadChoice } from '../wad/load.ts';
 
 export function showStartMenu(root: HTMLElement): void {
   root.style.background = '#000';
@@ -13,10 +20,16 @@ export function showStartMenu(root: HTMLElement): void {
       <div style="color:#e33;font:bold 52px monospace;text-shadow:3px 3px 0 #500;margin-bottom:6px">DOOMCRAFT</div>
       <div style="color:#a66;font:13px monospace;margin-bottom:34px">DOOM II &times; MINECRAFT &mdash; 2-PLAYER DEATHMATCH WITH MONSTERS</div>
 
-      <div style="margin-bottom:18px">
+      <div style="margin-bottom:10px">
         <label style="color:#e88;font:bold 13px monospace;margin-right:8px">MAP</label>
         <select id="menu-map" style="background:#1a1a1a;color:#ddd;border:1px solid #822;
           font:bold 14px monospace;padding:4px 8px"></select>
+      </div>
+      <div style="margin-bottom:18px">
+        <label style="color:#e88;font:bold 13px monospace;margin-right:8px">GAME DATA</label>
+        <select id="menu-wad" style="background:#1a1a1a;color:#ddd;border:1px solid #822;
+          font:bold 14px monospace;padding:4px 8px;max-width:240px"></select>
+        <div id="menu-wad-err" style="color:#e33;font:12px monospace;margin-top:6px;min-height:14px"></div>
       </div>
 
       <button id="menu-solo" style="display:block;width:100%;margin-bottom:10px;padding:12px;
@@ -42,8 +55,69 @@ export function showStartMenu(root: HTMLElement): void {
     mapSel.appendChild(opt);
   }
 
+  // --- GAME DATA selector ---------------------------------------------------
+  const wadSel = menu.querySelector('#menu-wad') as HTMLSelectElement;
+  const wadErr = menu.querySelector('#menu-wad-err') as HTMLDivElement;
+  const upload = document.createElement('input');
+  upload.type = 'file';
+  upload.accept = '.wad,.WAD';
+  upload.style.display = 'none';
+  menu.appendChild(upload);
+
+  const addOpt = (value: string, label: string) => {
+    const o = document.createElement('option');
+    o.value = value;
+    o.textContent = label;
+    wadSel.appendChild(o);
+    return o;
+  };
+
+  void (async () => {
+    // server-offered WADs (HEAD probe; DOOM2 only exists in dev)
+    const served = async (name: string) => {
+      try {
+        return (await fetch(`/${name}`, { method: 'HEAD' })).ok;
+      } catch {
+        return false;
+      }
+    };
+    if (await served('DOOM2.WAD')) addOpt('builtin:DOOM2.WAD', 'DOOM2.WAD');
+    if (await served('freedm.wad')) addOpt('builtin:freedm.wad', 'FREEDM (free)');
+    for (const w of await listCachedWads()) {
+      addOpt(`idb:${w.hash}`, `${w.name.toUpperCase()} (saved)`);
+    }
+    addOpt('upload', 'UPLOAD A WAD…');
+    const saved = getWadChoice();
+    if (saved && [...wadSel.options].some((o) => o.value === saved)) wadSel.value = saved;
+    else setWadChoice(wadSel.value);
+  })();
+
+  wadSel.onchange = () => {
+    wadErr.textContent = '';
+    if (wadSel.value === 'upload') upload.click();
+    else setWadChoice(wadSel.value);
+  };
+  upload.onchange = async () => {
+    const file = upload.files?.[0];
+    if (!file) return;
+    const buf = await file.arrayBuffer();
+    if (!looksLikeDoom2(buf)) {
+      wadErr.textContent = 'Not a Doom 2-format WAD (no MAP01 found).';
+      wadSel.selectedIndex = 0;
+      setWadChoice(wadSel.value);
+      return;
+    }
+    const hash = await cacheWad(buf, file.name);
+    const opt = addOpt(`idb:${hash}`, `${file.name.toUpperCase()} (saved)`);
+    wadSel.insertBefore(opt, wadSel.querySelector('option[value=upload]'));
+    wadSel.value = opt.value;
+    setWadChoice(opt.value);
+  };
+
   const go = (params: string) => {
-    location.search = params;
+    // preserve a ?wad=<key> secret handle across navigation
+    const key = new URLSearchParams(location.search).get('wad');
+    location.search = params + (key ? `&wad=${encodeURIComponent(key)}` : '');
   };
   (menu.querySelector('#menu-solo') as HTMLButtonElement).onclick = () =>
     go(`?map=${mapSel.value}`);
