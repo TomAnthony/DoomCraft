@@ -115,7 +115,9 @@ export function showStartMenu(root: HTMLElement): void {
     };
     const hasFreedm = await served('freedm.wad');
     const hasFreedoom2 = await served('freedoom2.wad');
-    if (await served('DOOM2.WAD')) addOpt('builtin:DOOM2.WAD', 'DOOM2.WAD');
+    if (import.meta.env?.DEV && (await served('DOOM2.WAD'))) {
+      addOpt('builtin:DOOM2.WAD', 'DOOM2.WAD');
+    }
     // the sensible default: freedoom2 for solo play, freedm for deathmatch
     if (hasFreedm && hasFreedoom2) addOpt('auto:freedoom', 'FREEDOOM (match play style)');
     if (hasFreedoom2) addOpt('builtin:freedoom2.wad', 'FREEDOOM 2 (solo)');

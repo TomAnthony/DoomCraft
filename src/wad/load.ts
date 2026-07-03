@@ -240,9 +240,12 @@ export async function loadWadBuffer(
     if (buf) return buf;
   }
 
-  // 3. dev-canonical DOOM2.WAD, 4. mode-appropriate Freedoom
-  const dev = await tryFetch('/DOOM2.WAD');
-  if (dev) return dev;
+  // 3. dev-canonical DOOM2.WAD (vite dev only — production never probes,
+  // avoiding a guaranteed 404 per load), 4. mode-appropriate Freedoom
+  if (import.meta.env?.DEV) {
+    const dev = await tryFetch('/DOOM2.WAD');
+    if (dev) return dev;
+  }
   const freedoom = await autoFreedoom();
   if (freedoom) return freedoom;
 
