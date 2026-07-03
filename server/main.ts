@@ -98,7 +98,18 @@ const http = createServer(async (req, res) => {
   }
 });
 
-const wss = new WebSocketServer({ server: http });
+const MAX_ROOMS = 2000;
+
+// maxPayload: ticcmds are 15B and WAD chunks 256KB+5B — cap frames at
+// 1MB so a hostile client can't buffer huge frames in server memory.
+const wss = new WebSocketServer({ server: http, maxPayload: 1024 * 1024 });
+
+// periodic one-line stats so a traffic spike is visible in the logs
+setInterval(() => {
+  if (rooms.size > 0 || wss.clients.size > 0) {
+    console.log(`[stats] rooms=${rooms.size} sockets=${wss.clients.size} rss=${(process.memoryUsage.rss() / 1048576).toFixed(0)}MB`);
+  }
+}, 60_000).unref();
 
 wss.on('connection', (ws) => {
   let room: Room | null = null;
@@ -108,9 +119,14 @@ wss.on('connection', (ws) => {
 
   ws.on('message', (data, isBinary) => {
     if (isBinary) {
-      // in-game: relay verbatim to the other peer
+      // in-game: relay verbatim to the other peer. If the peer's socket
+      // has fallen hopelessly behind (>64MB queued), kill it rather than
+      // letting its backlog balloon server memory.
       const p = peer();
-      if (p && p.readyState === WebSocket.OPEN) p.send(data);
+      if (p && p.readyState === WebSocket.OPEN) {
+        if (p.bufferedAmount > 64 * 1024 * 1024) p.terminate();
+        else p.send(data);
+      }
       return;
     }
     let msg: { t: string; room?: string; map?: number; skill?: number; wadHash?: string };
@@ -121,6 +137,10 @@ wss.on('connection', (ws) => {
     }
 
     if (msg.t === 'create') {
+      if (rooms.size >= MAX_ROOMS) {
+        ws.send(JSON.stringify({ t: 'error', reason: 'server full' }));
+        return;
+      }
       room = {
         code: makeCode(),
         map: msg.map ?? 1,
