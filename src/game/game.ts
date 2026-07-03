@@ -369,6 +369,7 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
       ticsPerSec: Math.round((advancesInWindow / fpsWindowMs) * 1000),
       stallMaxMs: Math.round(stallMax),
       cushion,
+      starves: totalStarves,
       map: mapNumber,
       resyncs: resyncCount,
       ...(netClient ? netClient.stats() : { solo: true }),
@@ -570,10 +571,13 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
   // reconstruct the same state independently.
   // Adaptive jitter cushion: extra tics of send-sim gap held beyond
   // INPUT_DELAY. Cushion is latency, so hold only what the link needs:
-  // starved slots (wanted to advance, peer cmd not there) raise it;
-  // sustained smoothness slowly lowers it.
+  // starved slots (wanted to advance, peer cmd not there) raise it
+  // quickly; sustained smoothness lowers it slowly — and never below 1,
+  // because a zero cushion turns the next hiccup into visible stutter
+  // (field-observed: decay to 0 preceded every jitter burst).
   let cushion = 1;
   let starvedSlots = 0;
+  let totalStarves = 0;
   let smoothWindows = 0;
   let lastAdaptAt = performance.now() + 3000; // ignore warm-up
   function adaptCushion(now: number): void {
@@ -583,7 +587,7 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
       if (cushion < 4) cushion++;
       smoothWindows = 0;
     } else if (starvedSlots === 0) {
-      if (++smoothWindows >= 5 && cushion > 0) {
+      if (++smoothWindows >= 10 && cushion > 1) {
         cushion--;
         smoothWindows = 0;
       }
@@ -768,7 +772,10 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
           advancesInWindow++;
           advanced++;
         }
-        if (advanced === 0 && intermission === 0 && netClient.desync === null) starvedSlots++;
+        if (advanced === 0 && intermission === 0 && netClient.desync === null) {
+          starvedSlots++;
+          totalStarves++;
+        }
         adaptCushion(now);
       } else {
         sim.runTic([input.buildTicCmd()]);
