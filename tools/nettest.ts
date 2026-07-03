@@ -10,6 +10,9 @@ const relay = 'ws://localhost:8666';
 const browser = await chromium.launch();
 const ctxA = await browser.newContext({ viewport: { width: 960, height: 600 } });
 const ctxB = await browser.newContext({ viewport: { width: 960, height: 600 } });
+// stored names skip the join-name interstitial
+await ctxA.addInitScript(() => localStorage.setItem('doomcraft.playerName', 'NetA'));
+await ctxB.addInitScript(() => localStorage.setItem('doomcraft.playerName', 'NetB'));
 const pageA = await ctxA.newPage();
 const pageB = await ctxB.newPage();
 const errors: string[] = [];
@@ -58,6 +61,7 @@ for (const [name, page] of [['A', pageA], ['B', pageB]] as const) {
   if (text.includes('PEER DISCONNECTED')) errors.push(`${name}: peer disconnected`);
   const where = await page.evaluate(() => (window as { __dc?: { where(): unknown } }).__dc?.where());
   console.log(`${name}:`, JSON.stringify(where));
+  if (!where) errors.push(`${name}: never entered the game`);
 }
 
 await browser.close();

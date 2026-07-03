@@ -368,6 +368,7 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
       gapMax: gaps.length ? Number(gaps[gaps.length - 1]!.toFixed(1)) : null,
       ticsPerSec: Math.round((advancesInWindow / fpsWindowMs) * 1000),
       stallMaxMs: Math.round(stallMax),
+      cushion,
       map: mapNumber,
       resyncs: resyncCount,
       ...(netClient ? netClient.stats() : { solo: true }),
@@ -567,6 +568,31 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
   // --- desync recovery: rebuild the sim by replaying the full cmd log.
   // Determinism means the log is a complete serialization; both peers
   // reconstruct the same state independently.
+  // Adaptive jitter cushion: extra tics of send-sim gap held beyond
+  // INPUT_DELAY. Cushion is latency, so hold only what the link needs:
+  // starved slots (wanted to advance, peer cmd not there) raise it;
+  // sustained smoothness slowly lowers it.
+  let cushion = 1;
+  let starvedSlots = 0;
+  let smoothWindows = 0;
+  let lastAdaptAt = performance.now() + 3000; // ignore warm-up
+  function adaptCushion(now: number): void {
+    if (now - lastAdaptAt < 3000) return;
+    lastAdaptAt = now;
+    if (starvedSlots >= 2) {
+      if (cushion < 4) cushion++;
+      smoothWindows = 0;
+    } else if (starvedSlots === 0) {
+      if (++smoothWindows >= 5 && cushion > 0) {
+        cushion--;
+        smoothWindows = 0;
+      }
+    } else {
+      smoothWindows = 0;
+    }
+    starvedSlots = 0;
+  }
+
   let lastResyncAt = -Infinity;
   function resyncFromLog(): boolean {
     if (!netClient) return false;
@@ -723,11 +749,13 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
         // latency). Only catch up while the peer-cmd buffer is healthy,
         // so jittery links keep the smooth 1/slot cadence.
         netClient.pushLocalCmd(input.buildTicCmd());
+        const targetGap = INPUT_DELAY + cushion;
         const gap = netClient.sendTic - netClient.simTic;
         const ahead = netClient.bufferedAhead();
         let allowed = 1;
-        if (gap > INPUT_DELAY && ahead >= 2) allowed = 2;
-        if (gap > INPUT_DELAY + 6 && ahead >= 4) allowed = 4;
+        if (gap > targetGap && ahead >= 2) allowed = 2;
+        if (gap > targetGap + 6 && ahead >= 4) allowed = 4;
+        let advanced = 0;
         while (
           allowed-- > 0 &&
           intermission === 0 &&
@@ -738,7 +766,10 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
           postTic();
           lastAdvance = now;
           advancesInWindow++;
+          advanced++;
         }
+        if (advanced === 0 && intermission === 0 && netClient.desync === null) starvedSlots++;
+        adaptCushion(now);
       } else {
         sim.runTic([input.buildTicCmd()]);
         postTic();
