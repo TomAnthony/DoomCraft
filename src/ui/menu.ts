@@ -17,8 +17,9 @@ export function showStartMenu(root: HTMLElement): void {
     'font-family:monospace;background:radial-gradient(ellipse at center,#2a0f0f 0%,#000 75%)';
   menu.innerHTML = `
     <div style="text-align:center;min-width:340px">
-      <div style="color:#e33;font:bold 52px monospace;text-shadow:3px 3px 0 #500;margin-bottom:6px">DOOMCRAFT</div>
-      <div style="color:#a66;font:13px monospace;margin-bottom:34px">DOOM II &times; MINECRAFT &mdash; 2-4 PLAYER DEATHMATCH WITH MONSTERS</div>
+      <img src="/logo.png" alt="DoomCraft" width="150" height="150"
+        style="display:block;margin:0 auto 8px;filter:drop-shadow(0 0 16px rgba(255,60,0,0.3))">
+      <div style="color:#a66;font:13px monospace;margin-bottom:30px">DOOM II &times; MINECRAFT &mdash; 2-4 PLAYER DEATHMATCH WITH MONSTERS</div>
 
       <div style="margin-bottom:10px">
         <label style="color:#e88;font:bold 13px monospace;margin-right:8px">NAME</label>
