@@ -99,6 +99,7 @@ const MIME: Record<string, string> = {
   '.js': 'text/javascript',
   '.css': 'text/css',
   '.png': 'image/png',
+  '.mp4': 'video/mp4',
   '.wasm': 'application/wasm',
 };
 
@@ -120,7 +121,10 @@ const http = createServer(async (req, res) => {
     }
     // WADs never change and vite asset filenames are content-hashed —
     // let browsers cache them so reloads don't re-download 20MB
-    const cacheable = path.toLowerCase().endsWith('.wad') || path.startsWith('/assets/');
+    const cacheable =
+      path.toLowerCase().endsWith('.wad') ||
+      path.toLowerCase().endsWith('.mp4') ||
+      path.startsWith('/assets/');
     res.writeHead(200, {
       'Content-Type': MIME[extname(path)] ?? 'application/octet-stream',
       'Cache-Control': cacheable ? 'public, max-age=604800' : 'no-cache',

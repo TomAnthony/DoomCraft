@@ -3,12 +3,14 @@
 // Resolution order:
 //   1. ?wad=<key>            — fetch /wad/<key> (server-registered via
 //                              --wad path:key; the key can be a secret)
-//   2. saved menu choice     — 'builtin:<name>' (fetch /<name>) or
-//                              'idb:<hash>' (browser library)
+//   2. saved menu choice     — 'auto:freedoom' (freedoom2 for solo,
+//                              freedm for multiplayer), 'builtin:<name>'
+//                              (fetch /<name>) or 'idb:<hash>' (library)
 //   3. /DOOM2.WAD            — dev-canonical convenience (vite serves it;
 //                              the production server does not)
-//   4. /freedm.wad           — freely-distributable default, served by
-//                              both dev and production servers
+//   4. Freedoom default      — mode-appropriate: /freedoom2.wad (solo,
+//                              monsters) or /freedm.wad (deathmatch),
+//                              falling back to whichever exists
 //   5. interactive picker    — unless quiet (joiners skip it: the host
 //                              transfers its WAD through the relay)
 //
@@ -198,8 +200,20 @@ export function pickWad(root: HTMLElement): Promise<ArrayBuffer> {
  */
 export async function loadWadBuffer(
   root: HTMLElement,
-  opts: { quiet?: boolean } = {},
+  opts: { quiet?: boolean; multiplayer?: boolean } = {},
 ): Promise<ArrayBuffer | null> {
+  // freedm is deathmatch-only maps; freedoom2 has the solo campaign
+  const freedoomOrder = opts.multiplayer
+    ? ['freedm.wad', 'freedoom2.wad']
+    : ['freedoom2.wad', 'freedm.wad'];
+  const autoFreedoom = async (): Promise<ArrayBuffer | null> => {
+    for (const name of freedoomOrder) {
+      const buf = await tryFetch(`/${name}`);
+      if (buf) return buf;
+    }
+    return null;
+  };
+
   // 1. explicit server key (possibly secret)
   const key = new URLSearchParams(location.search).get('wad');
   if (key) {
@@ -209,7 +223,10 @@ export async function loadWadBuffer(
 
   // 2. saved menu choice
   const choice = getWadChoice();
-  if (choice?.startsWith('idb:')) {
+  if (choice === 'auto:freedoom') {
+    const buf = await autoFreedoom();
+    if (buf) return buf;
+  } else if (choice?.startsWith('idb:')) {
     const hit = await idbGet(choice.slice(4)).catch(() => null);
     if (hit && looksLikeDoom2(hit.buf)) return hit.buf;
   } else if (choice?.startsWith('builtin:')) {
@@ -217,11 +234,11 @@ export async function loadWadBuffer(
     if (buf) return buf;
   }
 
-  // 3. dev-canonical DOOM2.WAD, 4. bundled freedm
+  // 3. dev-canonical DOOM2.WAD, 4. mode-appropriate Freedoom
   const dev = await tryFetch('/DOOM2.WAD');
   if (dev) return dev;
-  const freedm = await tryFetch('/freedm.wad');
-  if (freedm) return freedm;
+  const freedoom = await autoFreedoom();
+  if (freedoom) return freedoom;
 
   // 5. ask
   if (opts.quiet) return null;

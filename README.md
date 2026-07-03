@@ -79,17 +79,16 @@ the server warns on startup if that build is older than `src/`.)
    2-4 players are in (and any WAD transfers have finished). Players
    leaving mid-game are dropped cleanly; the survivors keep playing.
 
-The server also serves `freedoom2.wad` (Freedoom's single-player IWAD,
-with monsters) from the project root if you place it there — it then
-appears in the menu's GAME DATA selector.
-
 Direct URLs: `/play?map=7` (solo), `/play?host&map=7`, `/play?room=CODE`.
 
 ### Game data (WADs)
 
-- **FreeDM is the built-in default**: `freedm.wad` in the project root
-  is freely distributable and always served at `/freedm.wad`. (FreeDM
-  is deathmatch-only — its maps contain no monsters.)
+- **Freedoom is the built-in default**: `freedm.wad` (deathmatch-only
+  maps) and `freedoom2.wad` (solo campaign with monsters) in the
+  project root are freely distributable and served by the server. The
+  default GAME DATA choice, "FREEDOOM (match play style)", picks
+  freedoom2 for solo games and freedm for multiplayer automatically;
+  each is also listed individually with a (solo)/(deathmatch) label.
 - **The start menu has a GAME DATA selector**: server-offered WADs,
   your browser's saved WADs, and UPLOAD A WAD… (uploads are validated
   and cached in IndexedDB — local to your browser).

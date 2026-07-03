@@ -84,7 +84,7 @@ export interface NetOptions {
 export async function runGame(root: HTMLElement, startMap: number, net?: NetOptions): Promise<void> {
   // Joiners resolve quietly (no picker): whatever the host plays gets
   // transferred through the relay if we don't already have it.
-  let wadBuffer = await loadWadBuffer(root, { quiet: !!net?.room });
+  let wadBuffer = await loadWadBuffer(root, { quiet: !!net?.room, multiplayer: !!net });
   let blockGunAllowed = true; // solo always has the block gun
 
   // --- lobby (netgame) -----------------------------------------------------

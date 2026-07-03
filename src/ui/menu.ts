@@ -85,9 +85,13 @@ export function showStartMenu(root: HTMLElement): void {
         return false;
       }
     };
+    const hasFreedm = await served('freedm.wad');
+    const hasFreedoom2 = await served('freedoom2.wad');
     if (await served('DOOM2.WAD')) addOpt('builtin:DOOM2.WAD', 'DOOM2.WAD');
-    if (await served('freedm.wad')) addOpt('builtin:freedm.wad', 'FREEDM (free, deathmatch)');
-    if (await served('freedoom2.wad')) addOpt('builtin:freedoom2.wad', 'FREEDOOM (free, monsters)');
+    // the sensible default: freedoom2 for solo play, freedm for deathmatch
+    if (hasFreedm && hasFreedoom2) addOpt('auto:freedoom', 'FREEDOOM (match play style)');
+    if (hasFreedoom2) addOpt('builtin:freedoom2.wad', 'FREEDOOM 2 (solo)');
+    if (hasFreedm) addOpt('builtin:freedm.wad', 'FREEDM (deathmatch)');
     for (const w of await listCachedWads()) {
       addOpt(`idb:${w.hash}`, `${w.name.toUpperCase()} (saved)`);
     }
