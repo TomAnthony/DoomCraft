@@ -84,7 +84,13 @@ const http = createServer(async (req, res) => {
     } else {
       file = await readFile(join(DIST, path));
     }
-    res.writeHead(200, { 'Content-Type': MIME[extname(path)] ?? 'application/octet-stream' });
+    // WADs never change and vite asset filenames are content-hashed —
+    // let browsers cache them so reloads don't re-download 20MB
+    const cacheable = path.toLowerCase().endsWith('.wad') || path.startsWith('/assets/');
+    res.writeHead(200, {
+      'Content-Type': MIME[extname(path)] ?? 'application/octet-stream',
+      'Cache-Control': cacheable ? 'public, max-age=604800' : 'no-cache',
+    });
     res.end(file);
   } catch {
     res.writeHead(404);

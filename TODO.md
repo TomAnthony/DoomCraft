@@ -22,6 +22,12 @@ removed) as they land; anything sizeable also gets a SPEC.md update.
       worker (renderer consumes posted snapshots) would make netplay fully
       immune to main-thread jank; requires a serialization boundary for
       the renderer's direct mobj/sector access.
+- [ ] **WebRTC data channel** — game traffic currently relays through
+      the server (player→server→player, so ping = sum of both RTTs to
+      the server). A WebRTC DataChannel would connect peers directly
+      (server only for signalling), cutting latency when players are
+      near each other but far from the server. Traffic is tiny either
+      way (~4KB/s); only worth it if relay latency ever annoys.
 - [ ] **Client-side movement prediction** — with lockstep, your own
       movement echoes ~86ms late (aim is latency-free, walking isn't).
       Prediction would remove the "swimming" feel on real internet links.
