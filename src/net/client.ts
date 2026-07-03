@@ -2,6 +2,16 @@
 // each side sends only its ticcmds (10 bytes + header); the sim advances
 // when both players' cmds for the next tic are buffered. FNV checksums
 // exchanged every 35 tics detect desync.
+//
+// Transport is hybrid: cmds prefer a direct WebRTC DataChannel
+// (reliable, UNORDERED — cmds are tic-keyed so order is irrelevant and
+// this avoids TCP-style head-of-line blocking), with the ws relay as
+// fallback. While on RTC, every 35th cmd also goes via the relay as a
+// heartbeat: the receiver dedups by tic, and a heartbeat arriving while
+// the RTC copy is >1s behind is the demotion tripwire. Demotion is a
+// one-way ratchet (rtc → dual → relay, no mid-game promotion): the
+// receive side needs zero switching logic because all paths feed the
+// same tic-keyed map. Checksums and control stay on the ws.
 
 import { simChecksum } from '../sim/checksum.ts';
 import type { DoomSim } from '../sim/sim.ts';
@@ -79,6 +89,8 @@ export class NetClient {
           this.room = msg.room;
         } else if (msg.t === 'start') {
           this.slot = msg.slot;
+          // the host offers the persistent in-game cmd channel
+          if (msg.slot === 0) void this.openGameChannel();
           resolve({
             slot: msg.slot,
             map: msg.map,
@@ -169,14 +181,26 @@ export class NetClient {
   private async onRtcSignal(d: {
     sdp?: RTCSessionDescriptionInit;
     cand?: RTCIceCandidateInit;
+    hint?: string;
   }): Promise<void> {
     try {
+      if (d.hint === 'demote') {
+        if (this.path !== 'relay') this.demotePath('peer hint');
+        return;
+      }
       if (d.sdp?.type === 'offer') {
         const pc = new RTCPeerConnection({
           iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
         });
         this.rtcPc = pc;
+        this.pendingCands = [];
         pc.ondatachannel = (e) => {
+          if (e.channel.label === 'game') {
+            // joiner side of the persistent in-game cmd channel
+            this.gamePc = pc;
+            this.wireGameChannel(e.channel);
+            return;
+          }
           e.channel.binaryType = 'arraybuffer';
           e.channel.onmessage = (ev) => this.onBinary(new DataView(ev.data as ArrayBuffer));
         };
@@ -252,10 +276,21 @@ export class NetClient {
     }
   }
 
-  private onBinary(view: DataView): void {
+  private onBinary(view: DataView, src: 'ws' | 'rtc' = 'ws'): void {
     const type = view.getUint8(0);
     if (type === MSG_CMD) {
-      this.cmds[this.slot ^ 1]!.set(view.getUint32(1, true), decodeCmd(view, 5));
+      const tic = view.getUint32(1, true);
+      this.cmds[this.slot ^ 1]!.set(tic, decodeCmd(view, 5)); // dedup by tic
+      if (src === 'rtc') {
+        this.highTicRtc = Math.max(this.highTicRtc, tic);
+      } else {
+        this.highTicRelay = Math.max(this.highTicRelay, tic);
+        // tripwire: a relay heartbeat a full second ahead of anything the
+        // RTC path has delivered means the direct path is stalling
+        if (this.path === 'rtc' && this.highTicRtc >= 0 && tic - this.highTicRtc > 35) {
+          this.demotePath('RTC receive stalled behind relay heartbeat');
+        }
+      }
     } else if (type === MSG_CHECKSUM) {
       this.remoteChecksums.set(view.getUint32(1, true), view.getUint32(5, true));
     } else if (type === MSG_WAD_META) {
@@ -280,16 +315,124 @@ export class NetClient {
     }
   }
 
-  /** Queue the local cmd for sendTic and transmit it. */
-  pushLocalCmd(cmd: TicCmd): void {
-    const tic = this.sendTic++;
-    this.cmds[this.slot]!.set(tic, cmd);
+  // --- hybrid cmd transport -------------------------------------------------
+
+  /** 'rtc' = DataChannel + relay heartbeat; 'dual' = both (grace window
+   *  after trouble); 'relay' = ws only (terminal for this game). */
+  path: 'relay' | 'rtc' | 'dual' = 'relay';
+  private gamePc: RTCPeerConnection | null = null;
+  private gameDc: RTCDataChannel | null = null;
+  private highTicRtc = -1;
+  private highTicRelay = -1;
+
+  /** Host side: offer the persistent unordered in-game cmd channel. */
+  private async openGameChannel(): Promise<void> {
+    try {
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+      });
+      this.gamePc = pc;
+      this.rtcPc = pc; // signalling (answer/candidates) routes here
+      this.pendingCands = [];
+      const dc = pc.createDataChannel('game', { ordered: false });
+      this.wireGameChannel(dc);
+      pc.onicecandidate = (e) => {
+        if (e.candidate) this.ws?.send(JSON.stringify({ t: 'rtc', d: { cand: e.candidate } }));
+      };
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      this.ws?.send(JSON.stringify({ t: 'rtc', d: { sdp: pc.localDescription } }));
+    } catch {
+      // stays on relay
+    }
+  }
+
+  private wireGameChannel(dc: RTCDataChannel): void {
+    dc.binaryType = 'arraybuffer';
+    dc.onopen = () => {
+      if (this.path === 'relay' && this.gameDc === dc) {
+        this.path = 'rtc';
+        console.info('game path: direct WebRTC (relay heartbeat 1/s)');
+      }
+    };
+    dc.onmessage = (ev) => this.onBinary(new DataView(ev.data as ArrayBuffer), 'rtc');
+    dc.onclose = () => {
+      if (this.gameDc === dc && this.path !== 'relay') this.demotePath('channel closed', true);
+    };
+    dc.onerror = () => {
+      if (this.gameDc === dc) this.demotePath('channel error', true);
+    };
+    this.gameDc = dc;
+  }
+
+  /** One-way ratchet: rtc → dual (10s grace) → relay. */
+  private demotePath(reason: string, terminal = false): void {
+    if (this.path === 'relay') return;
+    console.info(`game path: demoting (${reason})${terminal ? ' → relay' : ' → dual'}`);
+    // cover any cmds lost in RTC flight: replay recent ones over the relay
+    for (let t = Math.max(0, this.sendTic - 35); t < this.sendTic; t++) {
+      const c = this.cmds[this.slot]!.get(t);
+      if (c) this.ws?.send(this.encodeFrame(t, c));
+    }
+    // hint the peer so both sides converge quickly
+    this.ws?.send(JSON.stringify({ t: 'rtc', d: { hint: 'demote' } }));
+    if (terminal) {
+      this.path = 'relay';
+      try {
+        this.gamePc?.close();
+      } catch {
+        // ignore
+      }
+      this.gameDc = null;
+      return;
+    }
+    this.path = 'dual';
+    setTimeout(() => {
+      if (this.path === 'dual') {
+        this.path = 'relay';
+        console.info('game path: relay (grace window over)');
+        try {
+          this.gamePc?.close();
+        } catch {
+          // ignore
+        }
+        this.gameDc = null;
+      }
+    }, 10_000);
+  }
+
+  private encodeFrame(tic: number, cmd: TicCmd): ArrayBuffer {
     const buf = new ArrayBuffer(5 + TICCMD_BYTES);
     const view = new DataView(buf);
     view.setUint8(0, MSG_CMD);
     view.setUint32(1, tic, true);
     encodeCmd(view, 5, cmd);
-    this.ws?.send(buf);
+    return buf;
+  }
+
+  /** Queue the local cmd for sendTic and transmit it. */
+  pushLocalCmd(cmd: TicCmd): void {
+    const tic = this.sendTic++;
+    this.cmds[this.slot]!.set(tic, cmd);
+    const frame = this.encodeFrame(tic, cmd);
+
+    const dcOpen = this.gameDc?.readyState === 'open';
+    if ((this.path === 'rtc' || this.path === 'dual') && dcOpen) {
+      // >64KB of 15B cmds queued means the channel is wedged
+      if (this.gameDc!.bufferedAmount > 65536) {
+        this.demotePath('send buffer wedged');
+      } else {
+        try {
+          this.gameDc!.send(frame);
+        } catch {
+          this.demotePath('send failed', true);
+        }
+      }
+    }
+    // relay carries: everything when not on rtc, else a 1/s heartbeat
+    if (this.path !== 'rtc' || tic % 35 === 0) {
+      this.ws?.send(frame);
+    }
   }
 
   /** Both cmds available for the next tic? */

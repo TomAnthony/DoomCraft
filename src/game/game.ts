@@ -435,6 +435,7 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
   (window as unknown as { __dc: unknown }).__dc = {
     sim,
     input,
+    net: netClient,
     look: () => ({
       angle: localPlayer().mo!.angle,
       queued: netClient ? netClient.pendingLocalTurn().yaw : 0,

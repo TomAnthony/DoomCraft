@@ -107,11 +107,22 @@ player positions *(planned)*.
 - **Model**: delay-based deterministic lockstep at 35Hz with a 3-tic input
   delay (`INPUT_DELAY` in `src/net/client.ts`; adaptive delay is future
   work). Both clients run identical sims; only inputs are exchanged.
-- **Wire format**: binary over WebSocket, `[u8 type][u32 tic][payload]`.
+- **Wire format**: binary frames `[u8 type][u32 tic][payload]`.
   Type 1 = ticcmd (10 bytes: `forwardmove i8, sidemove i8, angleturn i16,
   pitch i16, buttons u8, buttons2 u8 (jump/place/remove), pad u16`); type 2 =
-  checksum (u32). Weapon selection travels in `buttons` (vanilla
-  BT_CHANGE + 3-bit mask).
+  checksum (u32); types 3/4 = WAD transfer meta/chunk. Weapon selection
+  travels in `buttons` (vanilla BT_CHANGE + 3-bit mask).
+- **Hybrid cmd transport**: cmds prefer a direct WebRTC DataChannel
+  (reliable, unordered — cmds are tic-keyed so ordering is irrelevant,
+  which avoids head-of-line blocking), offered host→joiner at lobby
+  start. While on RTC, every 35th cmd also goes through the ws relay as
+  a heartbeat; receivers dedup by tic, so multi-path delivery needs no
+  coordination. Demotion is a one-way ratchet (rtc → dual for a 10s
+  grace window → relay; no mid-game promotion) triggered by channel
+  close/error, a wedged send buffer, a relay heartbeat arriving >35
+  tics ahead of the RTC path, or a peer hint; on demotion the last 35
+  cmds are replayed over the relay. Checksums and control always use
+  the ws.
 - **Server** (`server/main.ts`): single Node process — WebSocket relay with
   4-character room codes plus static hosting of `dist/`. JSON lobby
   (create/join); the game starts automatically when the second player

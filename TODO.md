@@ -22,12 +22,6 @@ removed) as they land; anything sizeable also gets a SPEC.md update.
       worker (renderer consumes posted snapshots) would make netplay fully
       immune to main-thread jank; requires a serialization boundary for
       the renderer's direct mobj/sector access.
-- [ ] **WebRTC for game traffic** — WAD transfers now go peer-to-peer
-      over a DataChannel (done 2026-07-03), but the 35Hz ticcmds still
-      relay through the server (ping = sum of both RTTs to the server).
-      Moving them onto the same DataChannel would cut latency when
-      players are near each other but far from the server. Traffic is
-      tiny (~4KB/s); only worth it if relay latency ever annoys.
 - [ ] **Client-side movement prediction** — with lockstep, your own
       movement echoes ~86ms late (aim is latency-free, walking isn't).
       Prediction would remove the "swimming" feel on real internet links.
@@ -43,6 +37,17 @@ removed) as they land; anything sizeable also gets a SPEC.md update.
       proper drawn hand-holding-block sprite.
 - [ ] **Autoaim vs blocks** — autoaim can acquire targets through block
       walls (the shot still hits the block; purely a targeting nicety).
+
+## Done recently (2026-07-03)
+
+- [x] Hybrid cmd transport: direct WebRTC DataChannel (unordered) with
+      relay heartbeat + one-way demotion ratchet (rtc → dual → relay);
+      WAD transfers also peer-to-peer with relay fallback
+- [x] WAD system: FreeDM default, menu picker/upload, host→joiner
+      transfer, --wad path:key private server WADs
+- [x] Start menu, copyable invite link, automap (Tab), 4:3 aspect
+      option, single-port hosting, stale-build tripwire, server
+      hardening + load test (1000 players ≈ 34.5k msg/s, p99 4.7ms)
 
 ## Done recently (playtest round, 2026-07-02)
 
