@@ -57,6 +57,8 @@ export class DoomSim {
   gameskill = 3; // Ultra-Violence default
   /** netgame pickup rules (weapons stay placed, keys shared) vs solo */
   netgame = false;
+  /** host rule: block gun (slot 8) available? Always true in solo. */
+  allowBlockGun = true;
   /** deathmatch-with-monsters: DM spawn points, all keys, no key things */
   deathmatch = false;
 
@@ -383,6 +385,9 @@ export class DoomSim {
       this.playerReborn(playernum);
     }
     const p = this.players[playernum]!;
+    // host-configurable rule: netgames may disable the block gun (slot 8);
+    // solo always has it (index 10 = Weapon.BlockGun)
+    p.weaponowned[10] = this.allowBlockGun;
 
     const x = start.x << FRACBITS;
     const y = start.y << FRACBITS;

@@ -65,7 +65,13 @@ player positions *(planned)*.
 | E | Use (doors, switches) |
 | Tab | Automap overlay (+/- to zoom, follows the player) |
 
-## 4. The block gun (weapon 8)
+## 4. The block gun
+
+- **Host toggle**: the start menu's "ALLOW BLOCK GUN (SLOT 8) IN
+  MULTIPLAYER" checkbox (default on; `?blocks=0` as a URL param) is a
+  host rule carried through the lobby `create`/`start` messages, so both
+  sims agree (`sim.allowBlockGun`, applied to `weaponowned` at every
+  player spawn). Solo play always has the block gun — just don't press 8. (weapon 8)
 
 - Always in the player's inventory; survives death; selected like any weapon.
 - **Grid**: 32-map-unit cubes on a global 3D grid aligned to the map origin.

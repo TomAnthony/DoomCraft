@@ -34,8 +34,12 @@ export function showStartMenu(root: HTMLElement): void {
 
       <button id="menu-solo" style="display:block;width:100%;margin-bottom:10px;padding:12px;
         background:#822;color:#fff;border:none;font:bold 18px monospace;cursor:pointer">SOLO GAME</button>
-      <button id="menu-host" style="display:block;width:100%;margin-bottom:18px;padding:12px;
+      <button id="menu-host" style="display:block;width:100%;margin-bottom:8px;padding:12px;
         background:#822;color:#fff;border:none;font:bold 18px monospace;cursor:pointer">HOST MULTIPLAYER</button>
+      <label style="display:block;margin-bottom:18px;color:#a66;font:12px monospace;cursor:pointer">
+        <input id="menu-blocks" type="checkbox" checked style="margin-right:6px;vertical-align:middle">
+        ALLOW BLOCK GUN (SLOT 8) IN MULTIPLAYER
+      </label>
 
       <div style="display:flex;gap:8px">
         <input id="menu-code" maxlength="4" placeholder="CODE" style="flex:1;background:#1a1a1a;
@@ -121,8 +125,10 @@ export function showStartMenu(root: HTMLElement): void {
   };
   (menu.querySelector('#menu-solo') as HTMLButtonElement).onclick = () =>
     go(`?map=${mapSel.value}`);
-  (menu.querySelector('#menu-host') as HTMLButtonElement).onclick = () =>
-    go(`?host&map=${mapSel.value}`);
+  (menu.querySelector('#menu-host') as HTMLButtonElement).onclick = () => {
+    const blocks = (menu.querySelector('#menu-blocks') as HTMLInputElement).checked;
+    go(`?host&map=${mapSel.value}${blocks ? '' : '&blocks=0'}`);
+  };
 
   const code = menu.querySelector('#menu-code') as HTMLInputElement;
   const join = () => {

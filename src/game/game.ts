@@ -77,12 +77,15 @@ export interface NetOptions {
   url: string;
   /** join this room; omit to create one */
   room?: string;
+  /** host rule: allow the block gun (slot 8) in this netgame */
+  blockGun?: boolean;
 }
 
 export async function runGame(root: HTMLElement, startMap: number, net?: NetOptions): Promise<void> {
   // Joiners resolve quietly (no picker): whatever the host plays gets
   // transferred through the relay if we don't already have it.
   let wadBuffer = await loadWadBuffer(root, { quiet: !!net?.room });
+  let blockGunAllowed = true; // solo always has the block gun
 
   // --- lobby (netgame) -----------------------------------------------------
   let netClient: NetClient | null = null;
@@ -134,6 +137,7 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
       const lobby = await netClient.connect(net.url, {
         room: net.room,
         map: startMap,
+        blockGun: net.blockGun,
         wadHash: hash,
         wadProvider: () => wadBuffer!,
         onWadProgress: (got, total) => {
@@ -147,6 +151,7 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
       clearInterval(poll);
       localSlot = lobby.slot;
       startMap = lobby.map;
+      blockGunAllowed = lobby.blockGun; // host rule, same on both peers
       if (lobby.receivedWad) {
         wadBuffer = lobby.receivedWad;
         void cacheWad(wadBuffer, 'from-host.wad'); // one-time: cached for next visit
@@ -262,6 +267,7 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
     sim.playeringame[1] = true;
     sim.netgame = true; // weapons stay placed for the other player
     sim.deathmatch = true; // DM spawn points, all keys, frags
+    sim.allowBlockGun = blockGunAllowed; // host rule (lobby-agreed)
   }
   const localPlayer = () => sim.players[localSlot]!;
 

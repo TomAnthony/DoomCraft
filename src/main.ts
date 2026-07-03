@@ -26,7 +26,12 @@ const sameOrigin = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${locatio
 const server =
   params.get('server') ?? (params.has('host') || params.has('room') ? sameOrigin : null);
 const net = server
-  ? { url: server, room: params.get('room') ?? undefined }
+  ? {
+      url: server,
+      room: params.get('room') ?? undefined,
+      // host rule: ?blocks=0 disables the block gun for the netgame
+      blockGun: params.get('blocks') !== '0',
+    }
   : undefined;
 
 // Bare URL: show the start menu instead of dropping into a game.

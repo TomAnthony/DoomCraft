@@ -41,6 +41,7 @@ interface Room {
   map: number;
   skill: number;
   wadHash: string;
+  blockGun: boolean; // host rule: block gun (slot 8) available
   players: (WebSocket | null)[]; // slot 0 = creator
 }
 
@@ -48,7 +49,9 @@ const rooms = new Map<string, Room>();
 
 function start(r: Room): void {
   for (let i = 0; i < 2; i++) {
-    r.players[i]!.send(JSON.stringify({ t: 'start', map: r.map, skill: r.skill, slot: i }));
+    r.players[i]!.send(
+      JSON.stringify({ t: 'start', map: r.map, skill: r.skill, slot: i, blockGun: r.blockGun }),
+    );
   }
   console.log(`room ${r.code} started`);
 }
@@ -129,7 +132,7 @@ wss.on('connection', (ws) => {
       }
       return;
     }
-    let msg: { t: string; room?: string; map?: number; skill?: number; wadHash?: string };
+    let msg: { t: string; room?: string; map?: number; skill?: number; wadHash?: string; blockGun?: boolean };
     try {
       msg = JSON.parse(String(data));
     } catch {
@@ -146,6 +149,7 @@ wss.on('connection', (ws) => {
         map: msg.map ?? 1,
         skill: msg.skill ?? 3,
         wadHash: msg.wadHash ?? '',
+        blockGun: msg.blockGun !== false,
         players: [ws, null],
       };
       slot = 0;

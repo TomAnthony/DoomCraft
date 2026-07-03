@@ -31,6 +31,8 @@ export interface LobbyResult {
   map: number;
   skill: number;
   room: string;
+  /** host rule: block gun available in this netgame */
+  blockGun: boolean;
   /** set when the host transferred its WAD to us during the lobby */
   receivedWad?: ArrayBuffer;
 }
@@ -38,6 +40,8 @@ export interface LobbyResult {
 export interface ConnectOptions {
   room?: string;
   map?: number;
+  /** host rule (create only): allow the block gun */
+  blockGun?: boolean;
   /** null = we have no WAD; the host will send one */
   wadHash: string | null;
   /** host side: supplies the bytes to stream on peerNeedsWad */
@@ -76,7 +80,14 @@ export class NetClient {
         if (opts.room) {
           ws.send(JSON.stringify({ t: 'join', room: opts.room, wadHash: opts.wadHash }));
         } else {
-          ws.send(JSON.stringify({ t: 'create', map: opts.map ?? 1, wadHash: opts.wadHash }));
+          ws.send(
+            JSON.stringify({
+              t: 'create',
+              map: opts.map ?? 1,
+              wadHash: opts.wadHash,
+              blockGun: opts.blockGun ?? true,
+            }),
+          );
         }
       };
       ws.onmessage = (ev) => {
@@ -96,6 +107,7 @@ export class NetClient {
             map: msg.map,
             skill: msg.skill,
             room: this.room,
+            blockGun: msg.blockGun !== false,
             receivedWad: this.receivedWad ?? undefined,
           });
         } else if (msg.t === 'peerNeedsWad') {
