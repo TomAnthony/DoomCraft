@@ -26,6 +26,10 @@ const MSG_CMD = 1;
 const MSG_CHECKSUM = 2;
 const MSG_WAD_META = 3;
 const MSG_WAD_CHUNK = 4;
+const MSG_LOG_META = 5;
+const MSG_LOG_CHUNK = 6;
+/** log entry wire size: [u8 slot][u32 tic][10B cmd] */
+const LOG_ENTRY_BYTES = 15;
 const WAD_CHUNK_SIZE = 256 * 1024;
 const MAX_NET_PLAYERS = 4;
 
@@ -42,6 +46,8 @@ export interface LobbyResult {
   blockGun: boolean;
   /** set when the host transferred its WAD to us during the lobby */
   receivedWad?: ArrayBuffer;
+  /** late join: we entered a running game and must replay the cmd log */
+  lateJoin?: { joinTic: number };
 }
 
 export interface ConnectOptions {
@@ -51,6 +57,10 @@ export interface ConnectOptions {
   name?: string;
   /** host rule (create only): allow the block gun */
   blockGun?: boolean;
+  /** host rule (create only): allow joins after game start */
+  lateJoin?: boolean;
+  /** late join: catch-up log transfer progress */
+  onLogProgress?: (got: number, total: number) => void;
   /** null = we have no WAD; the host will send one */
   wadHash: string | null;
   /** host side: supplies the bytes to stream on peerNeedsWad */
@@ -81,10 +91,31 @@ export class NetClient {
   sendTic = 0;
   desync: number | null = null;
   peerLeft = false;
-  /** slot -> first tic WITHOUT that player's cmd (server-arbitrated) */
-  readonly departures = new Map<number, number>();
-  /** UI callback: a player left mid-game */
+  /** per-slot join/leave events at server-arbitrated tics — part of the
+   *  deterministic input sequence (drives spawn/drop in every replay) */
+  readonly timeline: { tic: number; type: 'join' | 'leave'; slot: number }[] = [];
+  /** UI callbacks */
   onPlayerLeft: ((slot: number) => void) | null = null;
+  onPlayerJoined: ((slot: number, name: string) => void) | null = null;
+
+  /** Is this slot an active player at the given tic? */
+  activeAt(slot: number, tic: number): boolean {
+    let active = false;
+    for (const e of this.timeline) {
+      if (e.slot !== slot || e.tic > tic) continue;
+      active = e.type === 'join';
+    }
+    return active;
+  }
+
+  /** Apply join/leave events landing exactly at this tic to the sim. */
+  applyTimelineAt(tic: number, sim: DoomSim): void {
+    for (const e of this.timeline) {
+      if (e.tic !== tic) continue;
+      if (e.type === 'join') sim.joinPlayer(e.slot);
+      else sim.dropPlayer(e.slot);
+    }
+  }
 
   /** smoothed ws relay round-trip, ms (-1 until measured) */
   rttMs = -1;
@@ -92,12 +123,68 @@ export class NetClient {
   private pingSent = new Map<number, number>();
 
   private wadIncoming: { buf: Uint8Array; got: number } | null = null;
+  private logExpected = -1;
+  private logReceived = 0;
+  private logResolve: (() => void) | null = null;
+  /** interval id: pushes empty cmds while a late joiner replays */
+  autoPump: number | null = null;
+  onLogProgress: ((got: number, total: number) => void) | null = null;
+
+  stopAutoPump(): void {
+    if (this.autoPump !== null) {
+      clearInterval(this.autoPump);
+      this.autoPump = null;
+    }
+  }
+
+  /** Resolves when the donor's cmd log has fully arrived. */
+  logComplete(): Promise<void> {
+    if (this.logExpected >= 0 && this.logReceived >= this.logExpected) return Promise.resolve();
+    return new Promise((r) => {
+      this.logResolve = r;
+    });
+  }
+
+  /** Donor side: stream every buffered cmd to a late joiner. */
+  private async sendLog(to: number): Promise<void> {
+    const ws = this.ws!;
+    const entries: { slot: number; tic: number; cmd: TicCmd }[] = [];
+    for (let s = 0; s < MAX_NET_PLAYERS; s++) {
+      for (const [tic, cmd] of this.cmds[s]!) entries.push({ slot: s, tic, cmd });
+    }
+    const meta = new DataView(new ArrayBuffer(6));
+    meta.setUint8(0, MSG_LOG_META);
+    meta.setUint8(1, to);
+    meta.setUint32(2, entries.length, true);
+    ws.send(meta.buffer);
+    const PER_CHUNK = 2000; // 30KB frames
+    for (let i = 0; i < entries.length; i += PER_CHUNK) {
+      while (ws.bufferedAmount > 1024 * 1024) {
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      const batch = entries.slice(i, i + PER_CHUNK);
+      const frame = new Uint8Array(2 + batch.length * LOG_ENTRY_BYTES);
+      const view = new DataView(frame.buffer);
+      view.setUint8(0, MSG_LOG_CHUNK);
+      view.setUint8(1, to);
+      let off = 2;
+      for (const e of batch) {
+        view.setUint8(off, e.slot);
+        view.setUint32(off + 1, e.tic, true);
+        encodeCmd(view, off + 5, e.cmd);
+        off += LOG_ENTRY_BYTES;
+      }
+      ws.send(frame.buffer);
+    }
+    console.info(`late join: streamed ${entries.length} log entries to slot ${to}`);
+  }
   private receivedWad: ArrayBuffer | null = null;
   private onWadProgress: ((got: number, total: number) => void) | null = null;
 
   /** Connect and run the lobby: create a room or join one. */
   connect(url: string, opts: ConnectOptions): Promise<LobbyResult> {
     this.onWadProgress = opts.onWadProgress ?? null;
+    this.onLogProgress = opts.onLogProgress ?? null;
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(url);
       ws.binaryType = 'arraybuffer';
@@ -115,6 +202,7 @@ export class NetClient {
               map: opts.map ?? 1,
               wadHash: opts.wadHash,
               blockGun: opts.blockGun ?? true,
+              lateJoin: opts.lateJoin ?? true,
               name: opts.name,
             }),
           );
@@ -132,6 +220,9 @@ export class NetClient {
           this.slot = msg.slot;
           this.playerCount = msg.players ?? 2;
           this.names = msg.names ?? [];
+          for (let i = 0; i < this.playerCount; i++) {
+            this.timeline.push({ tic: 0, type: 'join', slot: i });
+          }
           // relay RTT probe (debug panel; ~2s cadence, trivial traffic)
           setInterval(() => {
             if (this.ws?.readyState === WebSocket.OPEN) {
@@ -169,6 +260,33 @@ export class NetClient {
               this.ws?.send(JSON.stringify({ t: 'needWad' }));
             }
           });
+        } else if (msg.t === 'lateStart') {
+          // we're joining a game already in progress
+          this.slot = msg.slot;
+          this.names = msg.names ?? [];
+          this.playerCount = Math.max(2, msg.slot + 1);
+          for (const e of msg.events ?? []) {
+            this.timeline.push({ tic: e.tic, type: e.type, slot: e.slot });
+          }
+          // pump empty cmds from the join tic immediately so the running
+          // players never stall waiting for us while we replay the log
+          this.sendTic = msg.joinTic;
+          this.autoPump = window.setInterval(() => {
+            if (this.ws?.readyState === WebSocket.OPEN) this.pushLocalCmd(emptyCmd());
+          }, 1000 / 35);
+          resolve({
+            slot: msg.slot,
+            map: msg.map,
+            skill: msg.skill,
+            room: this.room,
+            players: this.playerCount,
+            blockGun: msg.blockGun !== false,
+            receivedWad: this.receivedWad ?? undefined,
+            lateJoin: { joinTic: msg.joinTic },
+          });
+        } else if (msg.t === 'sendLog') {
+          // we're the donor: stream our full cmd log to the newcomer
+          void this.sendLog(msg.to);
         } else if (msg.t === 'roster') {
           this.names = msg.names ?? this.names;
           opts.onRoster?.(msg.count, msg.ready, msg.names ?? []);
@@ -188,11 +306,25 @@ export class NetClient {
           // agreed tic (clamped forward if we already simulated past it
           // via the RTC fast path — only possible with no peers left to
           // disagree with)
-          this.departures.set(msg.slot, Math.max(msg.tic, this.simTic));
+          this.timeline.push({
+            tic: Math.max(msg.tic, this.simTic),
+            type: 'leave',
+            slot: msg.slot,
+          });
           this.onPlayerLeft?.(msg.slot);
-          if (msg.slot === (this.slot ^ 1) && this.playerCount === 2) {
-            // our RTC partner is gone; make sure we're relay-only
+          if (this.gameDc) {
+            // our RTC partner may be the leaver; be safe and go relay
             this.demotePath('peer left', true);
+          }
+        } else if (msg.t === 'playerJoined') {
+          // late joiner enters the fray at a server-arbitrated tic
+          this.timeline.push({ tic: msg.tic, type: 'join', slot: msg.slot });
+          this.names[msg.slot] = msg.name ?? '';
+          this.playerCount = Math.max(this.playerCount, msg.slot + 1);
+          this.onPlayerJoined?.(msg.slot, msg.name ?? '');
+          if (this.path !== 'relay') {
+            // RTC hybrid is 2-player only; 3+ runs relay-first
+            this.demotePath('player joined (3+ players)', true);
           }
         } else if (msg.t === 'peerleft') {
           this.peerLeft = true;
@@ -403,6 +535,25 @@ export class NetClient {
     } else if (type === MSG_CHECKSUM) {
       if (slot >= MAX_NET_PLAYERS) return;
       this.remoteChecksums[slot]!.set(view.getUint32(2, true), view.getUint32(6, true));
+    } else if (type === MSG_LOG_META) {
+      this.logExpected = view.getUint32(2, true);
+      this.logReceived = 0;
+    } else if (type === MSG_LOG_CHUNK) {
+      let off = 2;
+      while (off + LOG_ENTRY_BYTES <= view.byteLength) {
+        const s = view.getUint8(off);
+        const tic = view.getUint32(off + 1, true);
+        if (s < MAX_NET_PLAYERS && !this.cmds[s]!.has(tic)) {
+          this.cmds[s]!.set(tic, decodeCmd(view, off + 5));
+        }
+        this.logReceived++;
+        off += LOG_ENTRY_BYTES;
+      }
+      this.onLogProgress?.(this.logReceived, this.logExpected);
+      if (this.logExpected >= 0 && this.logReceived >= this.logExpected && this.logResolve) {
+        this.logResolve();
+        this.logResolve = null;
+      }
     } else if (type === MSG_WAD_META) {
       this.wadIncoming = {
         buf: new Uint8Array(new ArrayBuffer(view.getUint32(2, true))),
@@ -548,9 +699,8 @@ export class NetClient {
   }
 
   private allHave(tic: number): boolean {
-    for (let i = 0; i < this.playerCount; i++) {
-      const gone = this.departures.get(i);
-      if (gone !== undefined && tic >= gone) continue; // departed: no cmd needed
+    for (let i = 0; i < MAX_NET_PLAYERS; i++) {
+      if (!this.activeAt(i, tic)) continue; // not in the game at this tic
       if (i === this.slot && tic < this.sendTic) continue; // our own cmds always exist
       if (!this.cmds[i]!.has(tic)) return false;
     }
@@ -572,19 +722,18 @@ export class NetClient {
   /** Run one lockstep tic. Returns the tic number just simulated.
    *  Cmds are retained — the full log is the game's serialization and
    *  powers replay-based desync recovery. */
-  advance(sim: DoomSim): number {
+  advance(sim: DoomSim, quiet = false): number {
     const tic = this.simTic;
-    // apply server-arbitrated departures exactly at their tic — part of
-    // the deterministic input sequence, identical on every survivor
-    for (const [slot, dropTic] of this.departures) {
-      if (dropTic === tic) sim.dropPlayer(slot);
-    }
+    // apply server-arbitrated join/leave events exactly at their tic —
+    // part of the deterministic input sequence, identical on every peer
+    this.applyTimelineAt(tic, sim);
     const cmds: TicCmd[] = [];
     for (let i = 0; i < MAX_NET_PLAYERS; i++) {
-      cmds.push(i < this.playerCount ? (this.cmds[i]!.get(tic) ?? emptyCmd()) : emptyCmd());
+      cmds.push(this.cmds[i]!.get(tic) ?? emptyCmd());
     }
     sim.runTic(cmds);
     this.simTic++;
+    if (quiet) return tic;
 
     // checksum exchange every 35 tics (broadcast; everyone compares all)
     if (tic % 35 === 0) {
@@ -603,8 +752,8 @@ export class NetClient {
   }
 
   private compareChecksums(): void {
-    for (let s = 0; s < this.playerCount; s++) {
-      if (s === this.slot || this.departures.has(s)) continue;
+    for (let s = 0; s < MAX_NET_PLAYERS; s++) {
+      if (s === this.slot || !this.activeAt(s, this.simTic)) continue;
       for (const [tic, remote] of this.remoteChecksums[s]!) {
         const local = this.localChecksums.get(tic);
         if (local === undefined) continue;
@@ -664,7 +813,7 @@ export class NetClient {
       rttMs: this.rttMs < 0 ? null : Math.round(this.rttMs),
       rtcHighTic: this.highTicRtc,
       relayHighTic: this.highTicRelay,
-      departures: [...this.departures.entries()],
+      timeline: this.timeline.map((e) => `${e.type[0]}${e.slot}@${e.tic}`),
       desyncTic: this.desync,
     };
   }

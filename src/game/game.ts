@@ -80,6 +80,8 @@ export interface NetOptions {
   room?: string;
   /** host rule: allow the block gun (slot 8) in this netgame */
   blockGun?: boolean;
+  /** host rule: allow joins after game start */
+  lateJoin?: boolean;
 }
 
 /** Direct join links bypass the menu, so first-time joiners get a
@@ -140,6 +142,7 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
   // --- lobby (netgame) -----------------------------------------------------
   let netClient: NetClient | null = null;
   let localSlot = 0;
+  let lateJoinInfo: { joinTic: number } | null = null;
   if (net) {
     const status = document.createElement('div');
     status.style.cssText =
@@ -225,6 +228,7 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
         room: net.room,
         map: startMap,
         blockGun: net.blockGun,
+        lateJoin: net.lateJoin,
         name: playerName,
         wadHash: hash,
         wadProvider: () => wadBuffer!,
@@ -244,9 +248,20 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
       localSlot = lobby.slot;
       startMap = lobby.map;
       blockGunAllowed = lobby.blockGun; // host rule, same on both peers
+      lateJoinInfo = lobby.lateJoin ?? null;
       if (lobby.receivedWad) {
         wadBuffer = lobby.receivedWad;
         void cacheWad(wadBuffer, 'from-host.wad'); // one-time: cached for next visit
+      }
+      if (lateJoinInfo) {
+        status.textContent = 'Joining game in progress — receiving history…';
+        netClient.onLogProgress = (got, total) => {
+          status.textContent = `Joining game in progress — receiving history… ${Math.min(
+            100,
+            Math.round((got / Math.max(1, total)) * 100),
+          )}%`;
+        };
+        await netClient.logComplete();
       }
     } catch (err) {
       status.textContent = `Netgame error: ${err instanceof Error ? err.message : String(err)}`;
@@ -394,6 +409,8 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
   }
   if (netClient) {
     netClient.onPlayerLeft = (slot) => toast(`${netClient!.nameOf(slot).toUpperCase()} LEFT THE GAME`);
+    netClient.onPlayerJoined = (slot, name) =>
+      toast(`${(name || `PLAYER ${slot + 1}`).toUpperCase()} JOINED THE GAME`);
   }
   const playerLabel = (slot: number): string =>
     netClient ? netClient.nameOf(slot).toUpperCase() : `PLAYER ${slot + 1}`;
@@ -427,7 +444,8 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
   const localPlayer = () => sim.players[localSlot]!;
 
   // prefill the input-delay buffer so both sims can start immediately
-  if (netClient) {
+  // (late joiners already auto-pump from their join tic instead)
+  if (netClient && !lateJoinInfo) {
     for (let i = 0; i < INPUT_DELAY; i++) netClient.pushLocalCmd(emptyCmd());
   }
 
@@ -563,8 +581,41 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
     music.play(musicLumpForMap(n, musicNames, MUS.runnin));
   }
 
-  loadLevel(mapNumber);
-  const initialMap = mapNumber;
+  if (netClient && lateJoinInfo) {
+    // Late join: reconstruct the running game by replaying the cmd log
+    // (the same determinism trick as desync recovery). Tic-0 players
+    // spawn inside loadLevel for RNG-order fidelity; later join/leave
+    // events (including our own arrival) apply at their recorded tics.
+    for (let i = 0; i < 4; i++) sim.playeringame[i] = netClient.activeAt(i, 0);
+    let map = startMap;
+    loadLevelSim(map);
+    const t0 = performance.now();
+    // replay to the live edge — and keep draining until we cross our own
+    // join tic (it sits ~2s in the future by design, so our marine may
+    // not exist at the first edge we reach)
+    while (netClient.simTic <= lateJoinInfo.joinTic) {
+      if (sim.exitPending) {
+        const secret = sim.exitPending === 'secret';
+        finishLevel(sim);
+        map = nextMap(map, secret);
+        loadLevelSim(map);
+      }
+      if (netClient.canAdvance() && netClient.simTic < netClient.sendTic) {
+        netClient.advance(sim, true);
+      } else {
+        await new Promise((r) => setTimeout(r, 50)); // live cmds incoming
+      }
+    }
+    mapNumber = map;
+    buildLevelRender(map);
+    netClient.stopAutoPump();
+    console.info(
+      `late join: replayed ${netClient.simTic} tics in ${(performance.now() - t0).toFixed(0)}ms`,
+    );
+  } else {
+    loadLevel(mapNumber);
+  }
+  const initialMap = startMap;
 
   // --- desync recovery: rebuild the sim by replaying the full cmd log.
   // Determinism means the log is a complete serialization; both peers
@@ -604,15 +655,14 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
     const t0 = performance.now();
 
     sim.resetForReplay();
-    // departed players were present from the start; they drop again at
-    // their recorded tic during the replay
-    for (let i = 0; i < netClient.playerCount; i++) sim.playeringame[i] = true;
+    // tic-0 players spawn inside loadLevel (order matters for RNG:
+    // things, then players, then specials — matching the original run);
+    // later join/leave events re-apply at their tics during the replay
+    for (let i = 0; i < 4; i++) sim.playeringame[i] = netClient.activeAt(i, 0);
     let map = initialMap;
     loadLevelSim(map);
     for (let t = 0; t < total; t++) {
-      for (const [slot, dropTic] of netClient.departures) {
-        if (dropTic === t) sim.dropPlayer(slot);
-      }
+      if (t > 0) netClient.applyTimelineAt(t, sim);
       if (sim.exitPending) {
         const secret = sim.exitPending === 'secret';
         finishLevel(sim);

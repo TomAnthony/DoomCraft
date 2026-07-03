@@ -77,7 +77,11 @@ the server warns on startup if that build is older than `src/`.)
 3. Friends paste the link, or type the code into JOIN GAME.
 4. The host's lobby shows the roster; START GAME begins the match once
    2-4 players are in (and any WAD transfers have finished). Players
-   leaving mid-game are dropped cleanly; the survivors keep playing.
+   leaving mid-game are dropped cleanly; the survivors keep playing —
+   and (unless the host unticks "Allow joins after game start") anyone
+   with the link can join a running game, including players rejoining
+   after a disconnect: they catch up by replaying the game's cmd log
+   and enter the fray a couple of seconds later.
 
 Direct URLs: `/play?map=7` (solo), `/play?host&map=7`, `/play?room=CODE`.
 

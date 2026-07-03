@@ -42,9 +42,13 @@ export function showStartMenu(root: HTMLElement): void {
         background:#822;color:#fff;border:none;font:bold 18px monospace;cursor:pointer">SOLO GAME</button>
       <button id="menu-host" style="display:block;width:100%;margin-bottom:8px;padding:12px;
         background:#822;color:#fff;border:none;font:bold 18px monospace;cursor:pointer">HOST MULTIPLAYER</button>
-      <label style="display:block;margin-bottom:18px;color:#a66;font:12px monospace;cursor:pointer">
+      <label style="display:block;margin-bottom:6px;color:#a66;font:12px monospace;cursor:pointer">
         <input id="menu-blocks" type="checkbox" checked style="margin-right:6px;vertical-align:middle">
         ALLOW BLOCK GUN (SLOT 8) IN MULTIPLAYER
+      </label>
+      <label style="display:block;margin-bottom:18px;color:#a66;font:12px monospace;cursor:pointer">
+        <input id="menu-latejoin" type="checkbox" checked style="margin-right:6px;vertical-align:middle">
+        ALLOW JOINS AFTER GAME START
       </label>
 
       <div style="display:flex;gap:8px">
@@ -156,7 +160,8 @@ export function showStartMenu(root: HTMLElement): void {
     go(`?map=${mapSel.value}`);
   (menu.querySelector('#menu-host') as HTMLButtonElement).onclick = () => {
     const blocks = (menu.querySelector('#menu-blocks') as HTMLInputElement).checked;
-    go(`?host&map=${mapSel.value}${blocks ? '' : '&blocks=0'}`);
+    const late = (menu.querySelector('#menu-latejoin') as HTMLInputElement).checked;
+    go(`?host&map=${mapSel.value}${blocks ? '' : '&blocks=0'}${late ? '' : '&latejoin=0'}`);
   };
 
   const code = menu.querySelector('#menu-code') as HTMLInputElement;

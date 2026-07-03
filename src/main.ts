@@ -29,8 +29,10 @@ const net = server
   ? {
       url: server,
       room: params.get('room') ?? undefined,
-      // host rule: ?blocks=0 disables the block gun for the netgame
+      // host rules: ?blocks=0 disables the block gun; ?latejoin=0
+      // disallows joining after the game has started
       blockGun: params.get('blocks') !== '0',
+      lateJoin: params.get('latejoin') !== '0',
     }
   : undefined;
 

@@ -143,7 +143,21 @@ player positions *(planned)*.
   delay (`INPUT_DELAY` in `src/net/client.ts`; adaptive delay is future
   work). All 2-4 clients run identical sims; only inputs are exchanged.
   The host opens a room, joiners accumulate (roster shown live), and the
-  host starts the game explicitly once 2-4 players are ready. A player
+  host starts the game explicitly once 2-4 players are ready.
+  **Late join / rejoin** (host rule "Allow joins after game start",
+  default on, `?latejoin=0` to disable): a player opening the invite
+  link mid-game takes a free slot, runs the normal WAD hash/cache/
+  transfer flow, then a donor peer (lowest slot) streams the full cmd
+  log (15B/entry, chunked over the relay) while the newcomer pumps
+  empty cmds from a server-arbitrated join tic (max relayed tic + 70 —
+  the margin outlasts the RTC heartbeat period) so nobody stalls. The
+  newcomer replays the log (~90k tics/s) through level transitions and
+  the join/leave timeline, crosses their join tic, and enters play; the
+  running players just see a toast and a marine materialize. Join/leave
+  events live on a per-slot timeline that all replays (including desync
+  resync) re-apply at their exact tics; rejoin after a disconnect is
+  the same flow reusing the freed slot. A third player joining an RTC
+  2-player game demotes the pair to relay. A player
   leaving mid-game does NOT end it: the server arbitrates the exact drop
   tic (first tic with no relayed cmd from them) and every survivor calls
   dropPlayer at that tic — removing the marine deterministically — while

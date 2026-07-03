@@ -151,6 +151,19 @@ export class DoomSim {
   }
 
   /**
+   * A player joins the netgame mid-game (late join / rejoin). MUST be
+   * called at the same tic on every peer (the server arbitrates it) —
+   * part of the deterministic input sequence, like dropPlayer.
+   */
+  joinPlayer(playernum: number): void {
+    if (this.playeringame[playernum]) return;
+    this.players[playernum] = new Player(playernum);
+    this.playeringame[playernum] = true;
+    this.players[playernum]!.playerstate = PlayerState.Reborn;
+    this.spawnPlayer(playernum);
+  }
+
+  /**
    * A player left the netgame: remove them from the world. MUST be
    * called at the same tic on every peer (the server arbitrates it) —
    * it is part of the deterministic input sequence.

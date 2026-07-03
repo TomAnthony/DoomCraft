@@ -46,12 +46,23 @@ interface Room {
   skill: number;
   wadHash: string;
   blockGun: boolean; // host rule: block gun (slot 8) available
+  lateJoin: boolean; // host rule: allow joins after game start
   players: (WebSocket | null)[]; // slot 0 = creator/host
   ready: boolean[]; // WAD hash verified per slot
   started: boolean;
   /** highest cmd tic relayed per slot (arbitrates dropout tic) */
   lastTic: number[];
   names: string[];
+  /** join/leave ledger (tics) — late joiners replay it */
+  events: { type: 'join' | 'leave'; slot: number; tic: number }[];
+}
+
+/** Lowest occupied slot: WAD/log donor for late joiners. */
+function donorSlot(r: Room): number {
+  for (let i = 0; i < r.players.length; i++) {
+    if (r.players[i]) return i;
+  }
+  return -1;
 }
 
 const rooms = new Map<string, Room>();
@@ -59,6 +70,37 @@ const rooms = new Map<string, Room>();
 function cleanName(raw: unknown, slot: number): string {
   const s = String(raw ?? '').replace(/[^\x20-\x7e]/g, '').trim().slice(0, 12);
   return s || `Player ${slot + 1}`;
+}
+
+/** A ready newcomer enters a running game: arbitrate the join tic,
+ *  announce them, and have the donor stream the cmd log. The 70-tic
+ *  margin (~2s) exceeds the RTC heartbeat period, so even peers whose
+ *  cmds mostly bypass the relay can't already be past the join tic. */
+function lateJoin(r: Room, slot: number): void {
+  const donor = donorSlot(r);
+  const joinTic = Math.max(...r.lastTic.filter((_, i) => r.players[i])) + 70;
+  r.events.push({ type: 'join', slot, tic: joinTic });
+  for (let i = 0; i < r.players.length; i++) {
+    if (i !== slot && r.players[i]) {
+      r.players[i]!.send(
+        JSON.stringify({ t: 'playerJoined', slot, name: r.names[slot], tic: joinTic }),
+      );
+    }
+  }
+  r.players[slot]!.send(
+    JSON.stringify({
+      t: 'lateStart',
+      map: r.map,
+      skill: r.skill,
+      slot,
+      blockGun: r.blockGun,
+      names: r.names,
+      joinTic,
+      events: r.events,
+    }),
+  );
+  r.players[donor]?.send(JSON.stringify({ t: 'sendLog', to: slot }));
+  console.log(`room ${r.code}: slot ${slot} late-joining at tic ${joinTic} (donor ${donor})`);
 }
 
 function roster(r: Room): void {
@@ -88,6 +130,7 @@ function start(r: Room): void {
     r.names.push('');
   }
   r.started = true;
+  for (let i = 0; i < live.length; i++) r.events.push({ type: 'join', slot: i, tic: 0 });
   for (let i = 0; i < live.length; i++) {
     live[i]!.send(
       JSON.stringify({
@@ -210,6 +253,7 @@ wss.on('connection', (ws) => {
       skill?: number;
       wadHash?: string;
       blockGun?: boolean;
+      lateJoin?: boolean;
       to?: number;
       from?: number;
       name?: string;
@@ -232,11 +276,13 @@ wss.on('connection', (ws) => {
         skill: msg.skill ?? 3,
         wadHash: msg.wadHash ?? '',
         blockGun: msg.blockGun !== false,
+        lateJoin: msg.lateJoin !== false,
         players: [ws, null, null, null],
         ready: [true, false, false, false],
         started: false,
         lastTic: [-1, -1, -1, -1],
         names: [cleanName(msg.name, 0), '', '', ''],
+        events: [],
       };
       slot = 0;
       rooms.set(room.code, room);
@@ -245,8 +291,13 @@ wss.on('connection', (ws) => {
       console.log(`room ${room.code} created (MAP${String(room.map).padStart(2, '0')})`);
     } else if (msg.t === 'join') {
       const r = rooms.get((msg.room ?? '').toUpperCase());
-      if (!r || r.started) {
-        ws.send(JSON.stringify({ t: 'error', reason: r ? 'game already started' : 'no such room' }));
+      if (!r || (r.started && !r.lateJoin)) {
+        ws.send(
+          JSON.stringify({
+            t: 'error',
+            reason: r ? 'the host has disabled late joins' : 'no such room',
+          }),
+        );
         return;
       }
       const free = r.players.findIndex((p, i) => i > 0 && p === null);
@@ -265,11 +316,13 @@ wss.on('connection', (ws) => {
         // check their IndexedDB library and reply wadReady (cache hit,
         // no transfer) or needWad (host streams it, RTC or relay)
         ws.send(JSON.stringify({ t: 'awaitWad', hash: r.wadHash }));
+      } else if (r.started) {
+        lateJoin(r, free);
       }
-      roster(r);
+      if (!r.started) roster(r);
     } else if (msg.t === 'needWad') {
       if (room && slot > 0 && !room.ready[slot]) {
-        room.players[0]?.send(JSON.stringify({ t: 'peerNeedsWad', slot }));
+        room.players[donorSlot(room)]?.send(JSON.stringify({ t: 'peerNeedsWad', slot }));
         console.log(`room ${room.code}: transferring WAD to slot ${slot}`);
       }
     } else if (msg.t === 'rtc') {
@@ -283,7 +336,8 @@ wss.on('connection', (ws) => {
       if (room && slot > 0) {
         if (msg.wadHash === room.wadHash) {
           room.ready[slot] = true;
-          roster(room);
+          if (room.started) lateJoin(room, slot);
+          else roster(room);
         } else {
           ws.send(JSON.stringify({ t: 'error', reason: 'WAD transfer failed (hash mismatch)' }));
         }
@@ -308,6 +362,7 @@ wss.on('connection', (ws) => {
       // keep playing (the first tic for which no cmd was relayed)
       room.players[slot] = null;
       const dropTic = room.lastTic[slot]! + 1;
+      room.events.push({ type: 'leave', slot, tic: dropTic });
       let remaining = 0;
       for (const p of room.players) {
         if (p && p.readyState === WebSocket.OPEN) {
