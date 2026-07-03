@@ -71,9 +71,9 @@ player positions *(planned)*.
   MULTIPLAYER" checkbox (default on; `?blocks=0` as a URL param) is a
   host rule carried through the lobby `create`/`start` messages, so both
   sims agree (`sim.allowBlockGun`, applied to `weaponowned` at every
-  player spawn). Solo play always has the block gun — just don't press 8. (weapon 8)
-
-- Always in the player's inventory; survives death; selected like any weapon.
+  player spawn). Solo play always has the block gun — just don't press 8.
+- Always in the player's inventory (unless disabled by the host rule);
+  survives death; selected like any weapon.
 - **Grid**: 32-map-unit cubes on a global 3D grid aligned to the map origin.
   (Player: radius 16, height 56, step-up 24, jump clears ~46 → 1 block is
   jumpable, a 2-stack is an unjumpable wall, a 3-high bridge leaves 64 units
