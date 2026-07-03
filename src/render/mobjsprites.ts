@@ -12,6 +12,13 @@ import { buildSpriteTable, rotationFor, type SpriteTable } from './sprites.ts';
 import type { TextureStore } from './textures.ts';
 import type { WadFile } from '../wad/wad.ts';
 
+export interface SpritePosition {
+  x: number;
+  y: number;
+  z: number;
+  height: number;
+}
+
 interface Tracked {
   mesh: THREE.Mesh;
   lump: string | null;
@@ -35,6 +42,14 @@ export class MobjSprites {
     wad: WadFile,
   ) {
     this.table = buildSpriteTable(wad);
+  }
+
+  /** Interpolated world position of a tracked mobj's sprite (render
+   *  coords: x, y-up, z) — used by overlays like name tags. */
+  positionOf(mobj: Mobj): { x: number; y: number; z: number } | null {
+    const t = this.tracked.get(mobj);
+    if (!t || !t.mesh.visible) return null;
+    return { x: t.mesh.position.x, y: t.mesh.position.y, z: t.mesh.position.z };
   }
 
   private material(lumpName: string, shadow: boolean, translation: number): THREE.ShaderMaterial {

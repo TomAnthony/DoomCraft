@@ -13,6 +13,7 @@ import {
 import { FRACUNIT } from '../src/sim/fixed.ts';
 import type { DoomSim } from '../src/sim/sim.ts';
 import { emptyCmd, type TicCmd } from '../src/sim/ticcmd.ts';
+import { pointInSubsector } from '../src/sim/maputl.ts';
 import { readMap } from '../src/wad/maps.ts';
 import { WadFile } from '../src/wad/wad.ts';
 
@@ -307,5 +308,62 @@ describe.skipIf(!wad)('minecraft parity', () => {
     expect(mo.floorz).toBeGreaterThan(startFloor);
     expect(mo.z).toBe(mo.floorz);
     expect(sim.blocks.count).toBeGreaterThan(0);
+  });
+});
+
+describe.skipIf(!wad)('blocks vs doors', () => {
+  test('a closing door bounces off a block beneath it', () => {
+    const sim = newSim();
+    // find a manual door (DR special 1) on MAP01
+    const line = sim.world.lines.find((l) => l.special === 1 && l.backsector)!;
+    expect(line).toBeTruthy();
+    const door = line.backsector!;
+    const openCeil = door.floorheight; // starts closed: ceiling == floor
+
+    // put a block in the doorway: nudge the line midpoint into the door
+    // sector (door sectors are thin, so cell centers may lie outside —
+    // the footprint-sampling hook must still catch it)
+    const mx = ((line.v1.x + line.v2.x) / 2) | 0;
+    const my = ((line.v1.y + line.v2.y) / 2) | 0;
+    const len = Math.hypot(line.dx / 65536, line.dy / 65536) || 1;
+    let cell: { bx: number; by: number; bz: number } | null = null;
+    for (const sign of [1, -1]) {
+      const nx = (mx + Math.round(((line.dy / 65536 / len) * 4 * sign)) * 65536) | 0;
+      const ny = (my + Math.round(((-line.dx / 65536 / len) * 4 * sign)) * 65536) | 0;
+      if (pointInSubsector(sim.world, nx, ny).sector === door) {
+        cell = { bx: nx >> 21, by: ny >> 21, bz: door.floorheight >> 21 };
+        break;
+      }
+    }
+    expect(cell).toBeTruthy();
+    sim.blocks.place(cell!.bx, cell!.by, cell!.bz);
+    const blockTop = (cell!.bz + 1) * (32 << 16);
+
+    // open the door via its line, then run ~10 seconds of tics
+    const opener = sim.players[0]!.mo!;
+    sim.useSpecialLine(opener, line, 0);
+    let minCeil = Infinity;
+    let reopened = false;
+    let peak = openCeil;
+    for (let t = 0; t < 350; t++) {
+      sim.runTic([emptyCmd(), emptyCmd(), emptyCmd(), emptyCmd()]);
+      if (door.ceilingheight > peak) peak = door.ceilingheight;
+      if (peak > openCeil && door.ceilingheight < peak) {
+        // door has started closing; watch how low it gets
+        minCeil = Math.min(minCeil, door.ceilingheight);
+      }
+      if (minCeil < Infinity && door.ceilingheight > minCeil + (8 << 16)) reopened = true;
+    }
+    // the door tried to close, never cut into the block, and went back up
+    expect(minCeil).toBeLessThan(peak);
+    expect(minCeil).toBeGreaterThanOrEqual(blockTop);
+    expect(reopened).toBe(true);
+
+    // crushers grind: crunch damages the block on the vanilla cadence
+    const hpBefore = sim.blocks.get(cell!.bx, cell!.by, cell!.bz)!.hp;
+    door.ceilingheight = (blockTop - (8 << 16)) | 0; // force overlap
+    while ((sim.leveltime & 3) !== 0) sim.runTic([emptyCmd(), emptyCmd(), emptyCmd(), emptyCmd()]);
+    sim.pmap.changeSector(door, true);
+    expect(sim.blocks.get(cell!.bx, cell!.by, cell!.bz)!.hp).toBeLessThan(hpBefore);
   });
 });

@@ -112,6 +112,13 @@ player positions *(planned)*.
   space of a teleporting player or monster is destroyed (exactly like
   monsters being stomped), so paving a teleporter destination can't
   entomb anyone.
+- **Blocks obstruct closing ceilings**: a door closing onto a block
+  bounces back open, exactly as if a player stood there (changeSector
+  consults the block grid; sector membership uses a 9-point footprint
+  sample since door sectors are thinner than a cell). Crushers instead
+  grind the block down (10 damage every 4th tic, vanilla crush cadence)
+  and proceed once it's destroyed. Rising floors ignore blocks —
+  interpenetration is by design.
 - **Jump/climb nuance**: the jump apex is ~36 map units, so a +32 rise
   between block tops is always jumpable, but a grid-aligned block whose
   top sits more than ~36 above a misaligned sector floor is not directly
@@ -142,8 +149,9 @@ player positions *(planned)*.
   names travel through the lobby (create/join → roster/start) and are
   purely presentational — used in the lobby roster, the kill feed
   ("X FRAGGED Y", from sim.fragEvents, transient per-tic like
-  soundEvents), and leave toasts — never entering sim state or
-  checksums.
+  soundEvents), leave toasts, and floating name tags above remote
+  players (depth-tested — walls occlude them; toggleable via the
+  options menu, default on) — never entering sim state or checksums.
 - **Wire format**: binary frames `[u8 type][u8 slot][payload]` — the slot
   byte is the SENDER for cmd/checksum frames (server broadcasts to all
   other peers) and the TARGET for WAD frames (server routes to one peer).

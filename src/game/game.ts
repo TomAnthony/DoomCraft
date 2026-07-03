@@ -12,6 +12,7 @@ import { BlocksMesh } from '../render/blocksmesh.ts';
 import { HudView } from '../render/hud.ts';
 import { LevelMesh } from '../render/levelmesh.ts';
 import { MobjSprites } from '../render/mobjsprites.ts';
+import { NameTags } from '../render/nametags.ts';
 import { makeSky } from '../render/sky.ts';
 import { TextureStore } from '../render/textures.ts';
 
@@ -250,6 +251,7 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
   applySize();
   window.addEventListener('resize', applySize);
 
+  let nameTagsEnabled = true;
   const input = new InputHandler();
   input.attach(renderer.domElement);
   renderer.domElement.addEventListener('click', () => audio.resume());
@@ -271,6 +273,9 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
     (hires) => {
       renderer.setPixelRatio(hires ? window.devicePixelRatio : 1);
       applySize();
+    },
+    (show) => {
+      nameTagsEnabled = show;
     },
   );
   // Esc exits pointer lock; that's the options key. Only after the game
@@ -384,6 +389,7 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
   let mapData: MapData;
   let level: LevelMesh | null = null;
   let sprites: MobjSprites | null = null;
+  let nameTags: NameTags | null = null;
   let blocksMesh: BlocksMesh | null = null;
   let sky: THREE.Mesh | null = null;
   let scene = new THREE.Scene();
@@ -446,6 +452,8 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
     scene.add(level.group);
     sprites = new MobjSprites(store, wad);
     scene.add(sprites.group);
+    nameTags = new NameTags();
+    scene.add(nameTags.group);
     blocksMesh = new BlocksMesh();
     scene.add(blocksMesh.mesh);
     scene.add(previewMesh);
@@ -715,6 +723,10 @@ export async function runGame(root: HTMLElement, startMap: number, net?: NetOpti
 
     if (sky) sky.position.copy(camera.position);
     sprites!.update(sim, camera, alpha, mo);
+    if (netClient && nameTags) {
+      nameTags.enabled = nameTagsEnabled;
+      nameTags.update(sim, sprites!, netClient.names, localSlot);
+    }
     blocksMesh!.sync(sim);
     updateBlockAids();
 

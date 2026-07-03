@@ -12,18 +12,22 @@ interface Saved {
   sensitivity: number;
   aspect43: boolean;
   hires: boolean;
+  nameTags: boolean;
 }
 
 function load(): Saved {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      return { music: 0.5, sfx: 0.6, sensitivity: 1, aspect43: true, hires: false, ...JSON.parse(raw) };
+      return {
+        music: 0.5, sfx: 0.6, sensitivity: 1, aspect43: true, hires: false, nameTags: true,
+        ...JSON.parse(raw),
+      };
     }
   } catch {
     // ignore
   }
-  return { music: 0.5, sfx: 0.6, sensitivity: 1, aspect43: true, hires: false };
+  return { music: 0.5, sfx: 0.6, sensitivity: 1, aspect43: true, hires: false, nameTags: true };
 }
 
 export class OptionsMenu {
@@ -37,6 +41,7 @@ export class OptionsMenu {
     onResume: () => void,
     onAspect?: (locked: boolean) => void,
     onHires?: (hires: boolean) => void,
+    onNameTags?: (show: boolean) => void,
   ) {
     const saved = load();
     audio.setMusicVolume(saved.music);
@@ -44,6 +49,7 @@ export class OptionsMenu {
     input.sensitivity = saved.sensitivity;
     onAspect?.(saved.aspect43);
     onHires?.(saved.hires);
+    onNameTags?.(saved.nameTags);
 
     this.panel = document.createElement('div');
     this.panel.style.cssText =
@@ -68,9 +74,13 @@ export class OptionsMenu {
           <input id="opt-aspect" type="checkbox" style="margin-right:8px">
           <span style="color:#e88">4:3 ASPECT RATIO (letterbox)</span>
         </label>
-        <label style="display:block;margin-bottom:24px;cursor:pointer">
+        <label style="display:block;margin-bottom:12px;cursor:pointer">
           <input id="opt-hires" type="checkbox" style="margin-right:8px">
           <span style="color:#e88">HI-RES RENDERING (more GPU)</span>
+        </label>
+        <label style="display:block;margin-bottom:24px;cursor:pointer">
+          <input id="opt-nametags" type="checkbox" style="margin-right:8px">
+          <span style="color:#e88">PLAYER NAME TAGS</span>
         </label>
         <button id="opt-resume" style="width:100%;padding:10px;background:#822;color:#fff;
           border:none;font:bold 18px monospace;cursor:pointer">RESUME (or click the game)</button>
@@ -82,11 +92,13 @@ export class OptionsMenu {
     const sens = this.panel.querySelector('#opt-sens') as HTMLInputElement;
     const aspect = this.panel.querySelector('#opt-aspect') as HTMLInputElement;
     const hires = this.panel.querySelector('#opt-hires') as HTMLInputElement;
+    const nametags = this.panel.querySelector('#opt-nametags') as HTMLInputElement;
     music.value = String(Math.round(saved.music * 100));
     sfx.value = String(Math.round(saved.sfx * 100));
     sens.value = String(Math.round(saved.sensitivity * 100));
     aspect.checked = saved.aspect43;
     hires.checked = saved.hires;
+    nametags.checked = saved.nameTags;
 
     const persist = () => {
       try {
@@ -98,6 +110,7 @@ export class OptionsMenu {
             sensitivity: Number(sens.value) / 100,
             aspect43: aspect.checked,
             hires: hires.checked,
+            nameTags: nametags.checked,
           }),
         );
       } catch {
@@ -122,6 +135,10 @@ export class OptionsMenu {
     });
     hires.addEventListener('change', () => {
       onHires?.(hires.checked);
+      persist();
+    });
+    nametags.addEventListener('change', () => {
+      onNameTags?.(nametags.checked);
       persist();
     });
     (this.panel.querySelector('#opt-resume') as HTMLButtonElement).addEventListener(

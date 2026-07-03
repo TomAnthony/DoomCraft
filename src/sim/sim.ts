@@ -104,6 +104,7 @@ export class DoomSim {
     };
     this.pmap.adjustHeights = this.blockAdjust;
     this.pmap.stompBlocks = this.blockStomp;
+    this.pmap.blockSectorCheck = this.blockSectorHook;
     this.pmap.gamemap = gamemap;
     this.gamemap = gamemap;
     this.leveltime = 0;
@@ -473,6 +474,7 @@ export class DoomSim {
   /** blocks: movement gap adjust, re-wired onto each level's PMap */
   blockAdjust: ((thing: Mobj, x: Fixed, y: Fixed) => void) | null = null;
   blockStomp: ((thing: Mobj, x: Fixed, y: Fixed, floorz: Fixed) => void) | null = null;
+  blockSectorHook: ((sector: Sector, crunch: boolean) => boolean) | null = null;
   /** blocks: sight check WITHOUT block occlusion (radius attacks use it) */
   checkSightBase: ((t1: Mobj, t2: Mobj) => boolean) | null = null;
   /** A_BossDeath floor triggers (wired to the specials module) */

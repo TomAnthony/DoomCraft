@@ -4,6 +4,7 @@
 
 import { MT } from '../sim/data/info.gen.ts';
 import { FRACBITS, type Fixed } from '../sim/fixed.ts';
+import { pointInSubsector } from '../sim/maputl.ts';
 import type { DoomSim } from '../sim/sim.ts';
 import type { Mobj } from '../sim/world.ts';
 import { BLOCK_FX, BLOCK_SHIFT, SPLASH_ATTEN_PER_BLOCK } from './grid.ts';
@@ -45,6 +46,45 @@ export function installBlocks(sim: DoomSim): void {
     for (const c of doomed) sim.blocks.remove(c.bx, c.by, c.bz);
   };
   if (sim.pmap) sim.pmap.stompBlocks = sim.blockStomp;
+
+  // Sector movement vs blocks: a lowering ceiling (door, crusher) that
+  // would cut into a block behaves as if a player stood there — the
+  // move is blocked (doors bounce back open). Crushers grind instead:
+  // they damage the block (vanilla cadence: 10 every 4th tic) until it
+  // is destroyed. Rising floors ignore blocks (interpenetration is by
+  // design — otherwise every lift under a block would wedge).
+  // door sectors are often thinner than a 32-unit cell, so membership
+  // uses a 9-point footprint sample, not just the cell center
+  const cellTouchesSector = (bx: number, by: number, sector: unknown): boolean => {
+    const x0 = bx * BLOCK_FX;
+    const y0 = by * BLOCK_FX;
+    const inset = 1 << FRACBITS; // 1 map unit in from the faces
+    const xs = [x0 + inset, x0 + BLOCK_FX / 2, x0 + BLOCK_FX - inset];
+    const ys = [y0 + inset, y0 + BLOCK_FX / 2, y0 + BLOCK_FX - inset];
+    for (const sx of xs) {
+      for (const sy of ys) {
+        if (pointInSubsector(sim.world, sx | 0, sy | 0).sector === sector) return true;
+      }
+    }
+    return false;
+  };
+
+  sim.blockSectorHook = (sector, crunch) => {
+    if (sim.blocks.count === 0) return false;
+    let blocked = false;
+    for (const cell of sim.blocks.entries()) {
+      // only cells whose top pokes above the (new) ceiling obstruct it
+      const top = (cell.bz + 1) * BLOCK_FX;
+      if (top <= sector.ceilingheight) continue;
+      if (!cellTouchesSector(cell.bx, cell.by, sector)) continue;
+      if (crunch && (sim.leveltime & 3) === 0) {
+        sim.blocks.damage(cell.bx, cell.by, cell.bz, 10);
+      }
+      blocked = true;
+    }
+    return blocked;
+  };
+  if (sim.pmap) sim.pmap.blockSectorCheck = sim.blockSectorHook;
 
   // Choke point 4: blocks occlude monster sight (but NOT radius attacks,
   // which use checkSightBase and per-depth attenuation instead).
